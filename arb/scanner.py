@@ -19,7 +19,7 @@ from .profit import est_days_to_clear, opportunity_score, scenarios
 from .retailers import create_scraper
 from .retailers.base import RetailerScraper
 from .stockx.catalog import CatalogResolver
-from .stockx.client import AccountNotReady, BudgetExhausted
+from .stockx.client import AccountNotReady, BudgetExhausted, StockXAPIError
 from .stockx.market import MarketDataProvider
 
 log = logging.getLogger(__name__)
@@ -71,6 +71,10 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
                           "stockx.com, then re-run. Stopping this scan.",
                           e.message)
                 break
+            except StockXAPIError as e:
+                # one product's API failure must never abort the whole retailer
+                log.warning("skipping %s — StockX said %s", product.url, e.message)
+                continue
             if used_market_call:
                 market_calls += 1
             for opp in opportunities:

@@ -17,6 +17,9 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.stockx.com/v2"
 MAX_RETRIES = 4
+# transient: 429 rate limit, 408 request timeout (StockX returns this when its
+# own upstream is slow) — both deserve a backoff-and-retry, not a hard failure
+_RETRYABLE_4XX = {408, 429}
 
 
 class BudgetExhausted(RuntimeError):
@@ -95,12 +98,13 @@ class StockXClient:
                     token = await self.tokens.get_access_token(force_refresh=True)
                     refreshed = True
                     continue
-                if 400 <= resp.status_code < 500 and resp.status_code != 429:
+                if (400 <= resp.status_code < 500
+                        and resp.status_code not in _RETRYABLE_4XX):
                     message = _error_message(resp)
                     if _ACCOUNT_SETUP_HINT in message.lower():
                         raise AccountNotReady(resp.status_code, message, path)
                     raise StockXAPIError(resp.status_code, message, path)
-                if resp.status_code == 429 or resp.status_code >= 500:
+                if resp.status_code in _RETRYABLE_4XX or resp.status_code >= 500:
                     if attempt == MAX_RETRIES:
                         break
                     retry_after = resp.headers.get("Retry-After")
