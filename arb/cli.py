@@ -246,6 +246,17 @@ async def _cmd_report(args) -> int:
     return 0
 
 
+async def _cmd_dashboard(args) -> int:
+    import asyncio as _asyncio
+
+    from .dashboard import run_dashboard
+    cfg = load_config(args.config)
+    # blocking server; run it off the event loop so Ctrl+C still lands
+    await _asyncio.get_running_loop().run_in_executor(
+        None, run_dashboard, cfg, args.host, args.port)
+    return 0
+
+
 async def _cmd_status(args) -> int:
     cfg = load_config(args.config)
     db = Database(cfg.db_file)
@@ -320,6 +331,11 @@ def main(argv: list[str] | None = None) -> int:
     p_report = sub.add_parser("report", help="current live opportunities, ranked")
     p_report.add_argument("--limit", type=int, default=25)
     p_report.set_defaults(func=_cmd_report)
+
+    p_dash = sub.add_parser("dashboard", help="live web dashboard (read-only)")
+    p_dash.add_argument("--host", default="127.0.0.1")
+    p_dash.add_argument("--port", type=int, default=8787)
+    p_dash.set_defaults(func=_cmd_dashboard)
 
     args = parser.parse_args(argv)
     _setup_logging(args.verbose)

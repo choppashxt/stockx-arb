@@ -38,6 +38,8 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
                    notifier: Notifier, limit: Optional[int] = None) -> ScanStats:
     started_at = datetime.now(timezone.utc).isoformat()
     stats = ScanStats()
+    # so the dashboard can tell "still scanning" from "hasn't run in ages"
+    db.kv_set(f"scan_started:{retailer_name}", started_at)
     scraper = create_scraper(retailer_name, cfg.retailers[retailer_name], db)
     resolver.resolutions_this_scan = 0
     market_calls = 0
@@ -85,6 +87,8 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
         await scraper.close()
         db.log_scan(retailer_name, started_at, stats.products_seen,
                     stats.candidates, stats.opportunities, stats.alerts_sent)
+        db.kv_set(f"scan_finished:{retailer_name}",
+                  datetime.now(timezone.utc).isoformat())
     log.info("%s scan done: %d products, %d candidates, %d opportunities, "
              "%d alerts", retailer_name, stats.products_seen, stats.candidates,
              stats.opportunities, stats.alerts_sent)
