@@ -161,8 +161,13 @@ retailers:
     scan_interval_minutes: 120
     request_delay_seconds: 10.0   # robots Crawl-delay: 10
     categories:
-      - /collections/sale         # fresh discounts every scan
-    sitemap_slice_per_scan: 25
+      - /collections/sale         # fresh discounts every scan, all pages
+    max_pages: 10                 # sale collection pagination
+    # Their robots.txt asks for a 10s crawl delay, which we honour — so the
+    # limit is time, not politeness. 250 + sale pages is roughly 45 min of a
+    # 120 min window, and covers their whole filtered catalog in under a day
+    # instead of 8 days.
+    sitemap_slice_per_scan: 250
     slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, yeezy, dunk, samba]
 

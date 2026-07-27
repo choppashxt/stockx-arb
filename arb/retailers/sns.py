@@ -34,12 +34,20 @@ class SnsScraper(RetailerScraper):
     name = "sns"
 
     async def scan(self) -> list[Product]:
-        # fresh: configured collection pages (e.g. /collections/sale)
+        # fresh: configured collections (e.g. /collections/sale), paginated —
+        # markdowns are where the money is, so we want all of them, not page 1
         fresh: list[str] = []
         for category in self.cfg.categories:
-            html = await self.fetcher.get(f"{BASE}{category}")
-            if html:
-                fresh.extend(_HANDLE_RE.findall(html))
+            for page in range(1, self.cfg.max_pages + 1):
+                url = f"{BASE}{category}" + (f"?page={page}" if page > 1 else "")
+                html = await self.fetcher.get(url)
+                if not html:
+                    break
+                found = _HANDLE_RE.findall(html)
+                new = [h for h in found if h not in fresh]
+                fresh.extend(new)
+                if not new:          # pagination exhausted (or repeating)
+                    break
         fresh = list(dict.fromkeys(fresh))
 
         # Shopify's paginated product sitemaps 400 without the ?from=&to=
