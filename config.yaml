@@ -46,6 +46,10 @@ stockx:
   # as much of the catalog as the budget allows, and resolutions cache forever.
   market_calls_per_scan: 1500     # max market-data product fetches per scan
   max_new_resolutions_per_scan: 2000  # style codes resolved (searched) per scan
+  # Barcode -> exact variant lookups. Only spent on products that already look
+  # profitable, and cached forever (barcodes never change), so the cost is
+  # one-off per shoe/size. Rademar, SNS and Overkill supply EANs.
+  gtin_lookups_per_scan: 400
   negative_cache_days: 3          # re-try style codes that resolved to nothing after this
 
 notifications:

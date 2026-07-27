@@ -14,7 +14,7 @@ from typing import Optional
 from ..db import Database
 from ..matching import style_ids_match
 from ..models import StockXProduct, StockXVariant
-from .client import StockXClient
+from .client import StockXAPIError, StockXClient
 
 log = logging.getLogger(__name__)
 
@@ -75,12 +75,15 @@ def _variant_from_api(v: dict) -> StockXVariant:
 
 class CatalogResolver:
     def __init__(self, client: Optional[StockXClient], db: Database,
-                 negative_cache_days: int, max_resolutions_per_scan: int = 10**9):
+                 negative_cache_days: int, max_resolutions_per_scan: int = 10**9,
+                 max_gtin_lookups_per_scan: int = 10**9):
         self.client = client        # None => offline: cache/fixtures only
         self.db = db
         self.negative_cache_days = negative_cache_days
         self.max_resolutions_per_scan = max_resolutions_per_scan
+        self.max_gtin_lookups_per_scan = max_gtin_lookups_per_scan
         self.resolutions_this_scan = 0
+        self.gtin_lookups_this_scan = 0
 
     async def resolve(self, candidates: list[str], brand: Optional[str] = None,
                       name: Optional[str] = None
@@ -134,6 +137,36 @@ class CatalogResolver:
                 return product, 0.5
         log.info("no StockX match for %s", candidates)
         return None, 0.0
+
+    async def resolve_gtin(self, gtin: str) -> Optional[StockXVariant]:
+        """Barcode -> exact StockX variant. The strongest match we can make:
+        a GTIN names one product in one size, so there is nothing to infer.
+        Cached permanently (barcodes never change) including misses."""
+        gtin = re.sub(r"\D", "", gtin or "")
+        if len(gtin) < 8:
+            return None
+        cached = self.db.get_gtin(gtin)
+        if cached is not None:
+            return cached[0]
+        if self.client is None or self.gtin_lookups_this_scan >= self.max_gtin_lookups_per_scan:
+            return None
+
+        self.gtin_lookups_this_scan += 1
+        try:
+            data = await self.client.get_variant_by_gtin(gtin)
+        except StockXAPIError as e:
+            if e.status in (400, 404):
+                # malformed or unknown barcode — a miss, not a failure. Cache it
+                # so one bad EAN never costs a lookup (or a product) twice.
+                self.db.put_gtin(gtin, None)
+                return None
+            raise
+        variant = _variant_from_api(data) if data else None
+        self.db.put_gtin(gtin, variant)
+        if variant:
+            log.info("gtin %s -> %s size %s", gtin, variant.product_id[:8],
+                     variant.size)
+        return variant
 
     async def variants(self, product_id: str) -> list[StockXVariant]:
         cached = self.db.get_variants(product_id)

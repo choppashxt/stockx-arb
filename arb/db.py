@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS stockx_variants (
     variant_json TEXT,
     PRIMARY KEY (product_id, variant_id)
 );
+CREATE TABLE IF NOT EXISTS stockx_gtins (
+    gtin         TEXT PRIMARY KEY,          -- EAN/UPC printed on the shoe box
+    found        INTEGER NOT NULL,          -- 0 = StockX has no such barcode
+    variant_json TEXT,
+    resolved_at  TEXT
+);
 CREATE TABLE IF NOT EXISTS market_snapshots (
     variant_id   TEXT PRIMARY KEY,
     product_id   TEXT,
@@ -163,6 +169,25 @@ class Database:
             "INSERT OR REPLACE INTO stockx_products VALUES (?,?,?,?,?)",
             (cache_key, int(product is not None),
              product.model_dump_json() if product else None, confidence, _now()))
+        self.conn.commit()
+
+    def get_gtin(self, gtin: str) -> Optional[tuple[Optional[StockXVariant]]]:
+        """None = never looked up. (None,) = cached 'StockX has no such
+        barcode'. (variant,) = hit. Barcodes are immutable, so no TTL."""
+        row = self.conn.execute(
+            "SELECT found, variant_json FROM stockx_gtins WHERE gtin=?",
+            (gtin,)).fetchone()
+        if row is None:
+            return None
+        if not row["found"]:
+            return (None,)
+        return (StockXVariant.model_validate_json(row["variant_json"]),)
+
+    def put_gtin(self, gtin: str, variant: Optional[StockXVariant]) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO stockx_gtins VALUES (?,?,?,?)",
+            (gtin, int(variant is not None),
+             variant.model_dump_json() if variant else None, _now()))
         self.conn.commit()
 
     def get_variants(self, product_id: str) -> list[StockXVariant]:

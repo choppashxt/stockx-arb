@@ -112,6 +112,7 @@ class Opportunity(BaseModel):
     list_ask: Optional[ProfitBreakdown] = None   # None when there is no live ask
     est_days_to_clear: Optional[float] = None
     match_confidence: float
+    size_match_method: str = "size chart"   # "barcode" when a GTIN pinned it
     score: float = 0.0
     key_override: Optional[str] = None  # e.g. product-level dedup for
                                         # size-stock-unverified retailers

@@ -75,6 +75,7 @@ class StockXConfig(BaseModel):
     market_refresh_minutes: int = 60
     market_calls_per_scan: int = 150
     max_new_resolutions_per_scan: int = 300
+    gtin_lookups_per_scan: int = 400   # barcode -> exact variant lookups
     negative_cache_days: int = 3
 
 

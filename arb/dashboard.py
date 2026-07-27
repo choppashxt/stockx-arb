@@ -112,6 +112,18 @@ def collect_stats(cfg: AppConfig) -> dict[str, Any]:
         "median_bid_ask_pct": round(100 * statistics.median(ratios), 1) if ratios else None,
     }
 
+    # --- barcode (GTIN) matching -------------------------------------------
+    try:
+        gtin_total = q("SELECT COUNT(*) FROM stockx_gtins")
+        gtin_hit = q("SELECT COUNT(*) FROM stockx_gtins WHERE found=1")
+    except sqlite3.Error:
+        gtin_total = gtin_hit = 0
+    out["gtin"] = {
+        "looked_up": gtin_total,
+        "matched": gtin_hit,
+        "hit_rate": round(100 * gtin_hit / gtin_total, 1) if gtin_total else 0.0,
+    }
+
     # --- StockX API budget --------------------------------------------------
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     used = q("SELECT COUNT(*) FROM api_requests WHERE ts >= ?", cutoff)
@@ -286,6 +298,8 @@ async function tick(){
         `${fmt(m.fresh)} fresh · ${m.with_live_bid_pct}% have a live bid`)}
  ${card("Median bid vs ask",m.median_bid_ask_pct==null?"—":m.median_bid_ask_pct+"%",
         "why sell-now rarely clears")}
+ ${card("Barcodes resolved",fmt(d.gtin.matched),
+        `${fmt(d.gtin.looked_up)} looked up · ${d.gtin.hit_rate}% on StockX · exact size matches`)}
  ${card("Alerts sent",fmt(al.total),`${fmt(al.last_24h)} in last 24h · ${fmt(al.review_queue)} in review queue`)}
  ${card("Profit floor",`€${s.min_profit_eur}`,
         (s.require_live_bid?"sell-now only (live bid)":"best of bid/ask")+

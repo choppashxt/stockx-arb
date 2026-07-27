@@ -61,7 +61,10 @@ def format_opportunity(o: Opportunity, reason: str) -> str:
         _fmt_scenario(o.sell_now, "Sell now"),
         _fmt_scenario(o.list_ask, "List @ ask"),
         "Liquidity: " + " / ".join(liq_bits),
-        f"Confidence {o.match_confidence:.2f} · score {o.score:.0f}"
+        f"Confidence {o.match_confidence:.2f}"
+        + (" · size ✅ barcode-exact" if o.size_match_method == "barcode"
+           else " · size via size chart")
+        + f" · score {o.score:.0f}"
         + (f" · ~{o.est_days_to_clear}d to clear" if o.est_days_to_clear else ""),
         f"BUY: {o.retail.url}",
         f"StockX: {o.stockx.url}",

@@ -42,6 +42,7 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
     db.kv_set(f"scan_started:{retailer_name}", started_at)
     scraper = create_scraper(retailer_name, cfg.retailers[retailer_name], db)
     resolver.resolutions_this_scan = 0
+    resolver.gtin_lookups_this_scan = 0
     market_calls = 0
 
     try:
@@ -175,10 +176,35 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
                  for v in variants if v.size]
 
     opportunities = []
+    by_id = {v.variant_id: v for v in variants}
     for size in sizes:
         if not size.in_stock:
             continue
-        variant, size_conf = _match_variant(size.us_size, size.label, variants)
+
+        # Barcode first: a GTIN names exactly one product in exactly one size,
+        # so there is nothing left to infer. It also cross-checks the style-code
+        # match — a barcode pointing at a different product means we got the
+        # shoe wrong, which is the one error that must never reach an alert.
+        variant, size_conf, method = None, 0.0, "size chart"
+        if size.ean:
+            gv = await resolver.resolve_gtin(size.ean)
+            if gv is not None:
+                if gv.product_id == sx_product.product_id:
+                    variant = by_id.get(gv.variant_id, gv)
+                    size_conf, method = 1.0, "barcode"
+                else:
+                    log.warning("GTIN %s says %s but style code %s resolved to "
+                                "%s — not alerting", size.ean, gv.product_id[:8],
+                                product.style_code, sx_product.product_id[:8])
+                    db.add_review(product.retailer, product.url,
+                                  product.style_code, "gtin_product_mismatch",
+                                  {"ean": size.ean, "size": size.label,
+                                   "gtin_product": gv.product_id,
+                                   "style_code_product": sx_product.product_id})
+                    continue
+
+        if variant is None:
+            variant, size_conf = _match_variant(size.us_size, size.label, variants)
         if variant is None or size_conf < 1.0:
             if variant is not None and 0 < size_conf < 1.0:
                 db.add_review(product.retailer, product.url, product.style_code,
@@ -189,9 +215,11 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         market = fresh.get(variant.variant_id)
         if market is None:
             continue
-        opp = _build_opportunity(product, size.label, size.us_size or "?",
+        opp = _build_opportunity(product, size.label,
+                                 size.us_size or variant.size or "?",
                                  sx_product, variant, market, confidence, cfg)
         if opp is not None:
+            opp.size_match_method = method
             opportunities.append(opp)
 
     if product.size_stock_unverified and opportunities:

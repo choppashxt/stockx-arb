@@ -42,7 +42,8 @@ def _build_stockx(cfg: AppConfig, secrets: Secrets, db: Database):
 
     client = StockXClient(TokenManager(secrets, db), db, cfg.stockx)
     resolver = CatalogResolver(client, db, cfg.stockx.negative_cache_days,
-                               cfg.stockx.max_new_resolutions_per_scan)
+                               cfg.stockx.max_new_resolutions_per_scan,
+                               cfg.stockx.gtin_lookups_per_scan)
     provider = StockXOfficialProvider(client, db, cfg.stockx)
     return client, resolver, provider
 

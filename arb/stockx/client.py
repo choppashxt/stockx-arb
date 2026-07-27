@@ -132,6 +132,11 @@ class StockXClient:
     async def get_variants(self, product_id: str) -> list[dict]:
         return await self.get(f"/catalog/products/{product_id}/variants") or []
 
+    async def get_variant_by_gtin(self, gtin: str) -> Optional[dict]:
+        """Barcode -> the exact product+size variant. 404 (unknown barcode)
+        comes back as None from .get()."""
+        return await self.get(f"/catalog/products/variants/gtins/{gtin}")
+
     async def get_product_market_data(self, product_id: str,
                                       currency: str) -> list[dict]:
         """All variants of a product in ONE request — the budget-friendly call."""
