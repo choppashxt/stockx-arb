@@ -22,6 +22,9 @@ except ImportError:
 from .config import AppConfig, Secrets, load_config
 from .db import Database
 from .notify import ConsoleNotifier, DiscordNotifier, Notifier, TelegramNotifier
+from .stockx.auth import TokenManager
+from .stockx.client import StockXAPIError, StockXClient
+from .stockx.market import StockXOfficialProvider
 
 log = logging.getLogger("arb")
 
@@ -215,36 +218,110 @@ async def _cmd_resolve(args) -> int:
 
 
 async def _cmd_report(args) -> int:
-    """Live opportunities snapshot, ranked. (Phase 6 CLI report.)"""
+    """What can I buy and flip RIGHT NOW?
+
+    Re-checks every recorded opportunity against live bids and the current
+    retail price before printing. The stored figures are history: bids get
+    taken and prices change, so printing them unverified would invite buying
+    against a bid that no longer exists.
+    """
     import json as _json
+    import sqlite3
+
+    from .models import Opportunity
+    from .profit import scenarios
+
     cfg = load_config(args.config)
-    db = Database(cfg.db_file)
-    rows = db.conn.execute(
-        "SELECT key, last_alerted, last_profit, was_in_stock, payload_json "
-        "FROM opportunities ORDER BY last_profit DESC LIMIT ?",
-        (args.limit,)).fetchall()
+    # read-only: the scanner may be mid-write, and we must never block it
+    ro = sqlite3.connect(f"file:{cfg.db_file}?mode=ro", uri=True, timeout=30)
+    ro.row_factory = sqlite3.Row
+    rows = ro.execute("SELECT key, last_alerted, payload_json "
+                      "FROM opportunities").fetchall()
     if not rows:
         print("no opportunities recorded yet")
-        db.close()
+        ro.close()
         return 0
-    print(f"{'profit':>8}  {'stock':5} {'last alerted':19}  opportunity")
-    for r in rows:
-        try:
-            p = _json.loads(r["payload_json"])
-            label = (f"{p['stockx'].get('title') or p['retail']['name']} "
-                     f"EU {p['size_label']} @ {p['retail']['retailer']} "
-                     f"€{p['retail']['price']:.0f} -> {p['retail']['url']}")
-        except Exception:
-            label = r["key"]
-        stock = "yes" if r["was_in_stock"] else "GONE"
-        print(f"€{r['last_profit']:>7.2f}  {stock:5} {r['last_alerted'][:19]}  {label}")
-    open_reviews = db.conn.execute(
+
+    secrets = Secrets()
+    if args.no_verify or not secrets.stockx_configured:
+        if not args.no_verify:
+            print("(StockX not configured — showing stored figures UNVERIFIED)")
+        _print_stored(rows, ro, args.limit)
+        ro.close()
+        return 0
+
+    # provider caches into a scratch DB so we never contend for the write lock
+    scratch = Database(":memory:")
+    client = StockXClient(TokenManager(secrets, scratch), scratch, cfg.stockx)
+    provider = StockXOfficialProvider(client, scratch, cfg.stockx)
+    live, gone = [], []
+    try:
+        for r in rows:
+            o = Opportunity.model_validate_json(r["payload_json"])
+            cur = ro.execute("SELECT price, in_stock, sizes_json FROM "
+                             "retail_products WHERE retailer=? AND url=?",
+                             (o.retail.retailer, o.retail.url)).fetchone()
+            if cur is None or not cur["in_stock"]:
+                gone.append((o, "out of stock"))
+                continue
+            size_ok = None
+            if (sizes := _json.loads(cur["sizes_json"] or "[]")):
+                m = [s for s in sizes if s["label"] == o.size_label]
+                size_ok = bool(m and m[0].get("in_stock"))
+            try:
+                md = (await provider.get_market_data(o.stockx.product_id)).get(
+                    o.variant.variant_id)
+            except StockXAPIError as e:
+                gone.append((o, f"StockX error: {e.message[:40]}"))
+                continue
+            if md is None or not md.highest_bid:
+                gone.append((o, "no live bid"))
+                continue
+            sn, _ = scenarios(cur["price"] + o.retail.extra_cost_eur, md,
+                              cfg.profit, cfg.vat)
+            profit = sn.profit if sn else float("-inf")
+            if profit < cfg.filters.min_profit_eur:
+                gone.append((o, f"bid €{md.highest_bid:.0f} -> €{profit:+.2f}"))
+                continue
+            live.append((profit, o, cur["price"], md, size_ok))
+    finally:
+        await client.close()
+        scratch.close()
+
+    print(f"=== LIVE SELL-NOW OPPORTUNITIES: {len(live)} "
+          f"(verified against live bids just now) ===")
+    for profit, o, price, md, size_ok in sorted(live, key=lambda x: -x[0])[:args.limit]:
+        flag = ("size in stock" if size_ok else
+                "SIZE NOT IN STOCK" if size_ok is False else "size stock UNKNOWN")
+        print(f"\n  €{profit:+8.2f}  {o.stockx.title[:52]}")
+        print(f"            EU {o.size_label} @ {o.retail.retailer} €{price:.2f}"
+              f" | live bid €{md.highest_bid:.0f} | {flag}")
+        print(f"            {o.retail.url}")
+    if gone:
+        print(f"\n=== no longer viable: {len(gone)} ===")
+        for o, why in gone[:args.limit]:
+            print(f"  {o.stockx.title[:44]:46} EU {str(o.size_label):<6} {why}")
+    open_reviews = ro.execute(
         "SELECT COUNT(*) FROM review_queue WHERE resolved=0").fetchone()[0]
     if open_reviews:
-        print(f"\nreview queue: {open_reviews} open items "
-              f"(SELECT * FROM review_queue WHERE resolved=0)")
-    db.close()
+        print(f"\nreview queue: {open_reviews} open items")
+    ro.close()
     return 0
+
+
+def _print_stored(rows, ro, limit: int) -> None:
+    import json as _json
+    print("stored (HISTORICAL, not re-checked):")
+    for r in rows[:limit]:
+        try:
+            p = _json.loads(r["payload_json"])
+            sn = (p.get("sell_now") or {}).get("profit")
+            label = (f"{p['stockx'].get('title')} EU {p['size_label']} @ "
+                     f"{p['retail']['retailer']} €{p['retail']['price']:.0f}")
+        except Exception:
+            sn, label = None, r["key"]
+        print(f"  sell-now {('€%.2f' % sn) if sn is not None else 'n/a':>10}  "
+              f"{r['last_alerted'][:16]}  {label}")
 
 
 async def _cmd_dashboard(args) -> int:
@@ -329,8 +406,11 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status", help="DB / budget overview")
     p_status.set_defaults(func=_cmd_status)
 
-    p_report = sub.add_parser("report", help="current live opportunities, ranked")
+    p_report = sub.add_parser(
+        "report", help="what you can buy and flip right now (re-checks live bids)")
     p_report.add_argument("--limit", type=int, default=25)
+    p_report.add_argument("--no-verify", action="store_true",
+                          help="print stored history without re-checking StockX")
     p_report.set_defaults(func=_cmd_report)
 
     p_dash = sub.add_parser("dashboard", help="live web dashboard (read-only)")
