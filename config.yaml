@@ -152,17 +152,15 @@ retailers:
     slug_filters: [nike, jordan, adidas, new_balance, puma, reebok]
 
   sportland_lt:
-    # ENABLED: reachable via a contact in Lithuania who can reship. Set
-    # extra_cost_eur to whatever that arrangement actually costs per pair â€”
-    # it is added to the buy price BEFORE profit is judged, so a EUR10 floor
-    # stays a real EUR10 in your pocket. Left at 0 until you know the number;
-    # until then LT profits are optimistic by exactly the reship cost.
+    # ENABLED: a contact in Lithuania handles these under a profit-split
+    # arrangement — he buys and sells on your behalf, so there is NO per-unit
+    # cost to add. Profit figures for this source are correct as printed.
     enabled: true
     extra_cost_eur: 0.0
-    buy_note: "LT store â€” needs reshipping via your LT contact (set extra_cost_eur)"
-    # .ee is always preferable (no reshipping), but LT is never suppressed â€”
-    # the storefronts share a catalog and price while stock differs per country,
-    # and LT routinely has sizes .ee does not.
+    buy_note: "LT store - handled by your LT contact"
+    # .ee is always preferable, but LT is never suppressed: the storefronts
+    # share a catalog and price while stock differs per country, and LT
+    # routinely has sizes .ee does not.
     prefer_retailer: sportland
     scan_interval_minutes: 90
     request_delay_seconds: 4.0
