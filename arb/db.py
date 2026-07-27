@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS stockx_variants (
     variant_json TEXT,
     PRIMARY KEY (product_id, variant_id)
 );
+-- How close each matched product last came to being profitable. Drives how
+-- often we spend an API call re-checking its bids: near-misses are watched
+-- closely, hopeless ones rarely. Without this, a flat refresh of everything
+-- would burn the whole daily budget on shoes whose bid is 13% of retail.
+CREATE TABLE IF NOT EXISTS sku_watch (
+    product_id  TEXT PRIMARY KEY,
+    best_profit REAL,          -- best sell-now profit at last evaluation
+    checked_at  TEXT
+);
 CREATE TABLE IF NOT EXISTS stockx_gtins (
     gtin         TEXT PRIMARY KEY,          -- EAN/UPC printed on the shoe box
     found        INTEGER NOT NULL,          -- 0 = StockX has no such barcode
@@ -177,6 +186,17 @@ class Database:
             "INSERT OR REPLACE INTO stockx_products VALUES (?,?,?,?,?)",
             (cache_key, int(product is not None),
              product.model_dump_json() if product else None, confidence, _now()))
+        self.conn.commit()
+
+    def get_watch(self, product_id: str) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT best_profit, checked_at FROM sku_watch WHERE product_id=?",
+            (product_id,)).fetchone()
+        return dict(row) if row else None
+
+    def put_watch(self, product_id: str, best_profit: Optional[float]) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO sku_watch VALUES (?,?,?)",
+                          (product_id, best_profit, _now()))
         self.conn.commit()
 
     def get_gtin(self, gtin: str) -> Optional[tuple[Optional[StockXVariant]]]:

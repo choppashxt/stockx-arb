@@ -133,11 +133,12 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
     if not variants:
         return [], False
 
-    # market data: cached snapshots first, one API call per product otherwise
+    # market data: cached snapshots first, one API call per product otherwise.
+    # How stale is acceptable depends on how close this SKU came last time.
+    ttl = _market_ttl_minutes(db, sx_product.product_id, cfg)
     fresh = {
         v.variant_id: md for v in variants
-        if (md := db.get_market_snapshot(
-            v.variant_id, cfg.stockx.market_refresh_minutes)) is not None
+        if (md := db.get_market_snapshot(v.variant_id, ttl)) is not None
     }
     used_call = False
     if len(fresh) < len(variants):
@@ -146,9 +147,14 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         fresh = await provider.get_market_data(sx_product.product_id)
         used_call = True
 
+    # remember how close this got, so the next re-check is scheduled sensibly
+    landed = product.price + product.extra_cost_eur
+    best = _best_upside(landed, fresh.values(), cfg)
+    db.put_watch(sx_product.product_id,
+                 None if best == float("-inf") else best)
+
     # any size worth a closer look at all? (product-level, before per-size work)
-    if not _any_upside(product.price + product.extra_cost_eur,
-                       fresh.values(), cfg):
+    if best < cfg.filters.min_profit_eur:
         return [], used_call
 
     # product-page confirmation BEFORE size matching: the grid only has EU
@@ -244,15 +250,37 @@ def _gate_profit(sell_now, list_ask, cfg: AppConfig) -> float:
     return max(profits) if profits else float("-inf")
 
 
-def _any_upside(retail_price: float, markets, cfg: AppConfig) -> bool:
-    """Could ANY variant clear min_profit at this retail price? Cheap gate so we
-    only spend product-page requests (and per-size work) on plausible items."""
+def _best_upside(retail_price: float, markets, cfg: AppConfig) -> float:
+    """Best profit any variant could yield at this retail price. Returned as a
+    number (not a bool) so we can remember HOW CLOSE a near-miss came and
+    re-check the close ones more often than the hopeless ones."""
+    best = float("-inf")
     for market in markets:
-        sell_now, list_ask = scenarios(retail_price, market, cfg.profit,
-                                       cfg.vat)
-        if _gate_profit(sell_now, list_ask, cfg) >= cfg.filters.min_profit_eur:
-            return True
-    return False
+        sell_now, list_ask = scenarios(retail_price, market, cfg.profit, cfg.vat)
+        best = max(best, _gate_profit(sell_now, list_ask, cfg))
+    return best
+
+
+def _any_upside(retail_price: float, markets, cfg: AppConfig) -> bool:
+    return _best_upside(retail_price, markets, cfg) >= cfg.filters.min_profit_eur
+
+
+def _market_ttl_minutes(db: Database, product_id: str, cfg: AppConfig) -> int:
+    """How stale may this product's bids be before we spend a call refreshing?
+
+    One market-data call covers a whole product, so the daily budget decides how
+    often each SKU can be looked at. Refreshing everything at the same rate
+    would spend most of it on shoes whose bid is a fraction of retail. Instead
+    the gap to profitability sets the cadence."""
+    watch = db.get_watch(product_id)
+    if watch is None or watch["best_profit"] is None:
+        return cfg.stockx.refresh_minutes_hot        # never assessed: look now
+    gap = cfg.filters.min_profit_eur - watch["best_profit"]
+    if gap <= 0:
+        return cfg.stockx.refresh_minutes_hot        # currently profitable
+    if gap <= cfg.stockx.near_miss_eur:
+        return cfg.stockx.refresh_minutes_warm       # a bid move could flip it
+    return cfg.stockx.refresh_minutes_cold           # far away; check daily
 
 
 def _match_variant(us_size: Optional[str], eu_label: Optional[str], variants):

@@ -93,6 +93,14 @@ class StockXConfig(BaseModel):
     market_calls_per_scan: int = 150
     max_new_resolutions_per_scan: int = 300
     gtin_lookups_per_scan: int = 400   # barcode -> exact variant lookups
+    # Tiered bid re-checking. One market-data call covers a whole product, so
+    # the budget decides how often each SKU can be re-examined. Products that
+    # nearly cleared the profit floor are watched closely; hopeless ones are
+    # revisited rarely, which is what makes watching everything affordable.
+    refresh_minutes_hot: int = 45      # already profitable, or within a whisker
+    refresh_minutes_warm: int = 240    # within near_miss_eur of the floor
+    refresh_minutes_cold: int = 1440   # nowhere near — once a day is plenty
+    near_miss_eur: float = 30.0
     negative_cache_days: int = 3
 
 
