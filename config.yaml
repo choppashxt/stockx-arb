@@ -17,7 +17,7 @@ vat:
   output_vat_on_sale: false       # do you owe VAT out of the StockX sale price?
 
 filters:
-  min_profit_eur: 25.0            # net profit that must be cleared
+  min_profit_eur: 10.0            # net profit that must be cleared
   require_live_bid: true          # profit is judged on the SELL NOW payout
                                   # (highest bid); items where only the
                                   # list-at-ask scenario is profitable stay quiet
@@ -32,7 +32,8 @@ filters:
   strict_liquidity: false
 
 alerts:
-  max_per_scan: 10                # per-opportunity messages per scan; rest summarized
+  max_per_scan: 20                # per-opportunity messages per scan; the rest are
+                                  # not lost — they alert on the next cycle
   re_alert_profit_delta_eur: 10.0 # re-alert an already-seen opportunity if profit moves this much
 
 stockx:
@@ -40,8 +41,11 @@ stockx:
   daily_request_budget: 20000     # self-imposed cap under the 25 000/24h hard limit
   min_request_interval_s: 1.05    # hard limit is 1 req/s
   market_refresh_minutes: 60      # reuse market snapshots younger than this
-  market_calls_per_scan: 150      # max market-data product fetches per scan
-  max_new_resolutions_per_scan: 300  # style codes resolved (searched) per scan
+  # Full-sweep settings: the real limiter is daily_request_budget above (StockX
+  # allows 1 req/s), so these are deliberately high — every cycle grinds through
+  # as much of the catalog as the budget allows, and resolutions cache forever.
+  market_calls_per_scan: 1500     # max market-data product fetches per scan
+  max_new_resolutions_per_scan: 2000  # style codes resolved (searched) per scan
   negative_cache_days: 3          # re-try style codes that resolved to nothing after this
 
 notifications:
@@ -67,7 +71,7 @@ retailers:
       - /soodus                   # sale — where the money is
       - /mehed
       - /naised
-    sitemap_slice_per_scan: 100   # backlog product pages revisited per scan
+    sitemap_slice_per_scan: 400   # backlog product pages revisited per scan
     slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, air-, dunk, yeezy,
                    samba, gazelle, campus, handball, spezial]
@@ -84,7 +88,7 @@ retailers:
     enabled: true
     scan_interval_minutes: 45
     request_delay_seconds: 2.5
-    sitemap_slice_per_scan: 120
+    sitemap_slice_per_scan: 500   # ~= their whole filtered catalog
     slug_filters: [nike, jordan, adidas, new-balance, newbalance, asics,
                    salomon, puma, converse, vans, hoka, saucony, reebok, ugg]
 
@@ -92,7 +96,7 @@ retailers:
     enabled: true
     scan_interval_minutes: 60     # biggest catalog; batched GraphQL queries
     request_delay_seconds: 3.0
-    sitemap_slice_per_scan: 800   # 40 per query -> ~20 requests per scan
+    sitemap_slice_per_scan: 2500  # 40 per query -> ~63 requests per scan
     graphql_batch_size: 40
     slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, ugg, timberland]
@@ -106,7 +110,7 @@ retailers:
     enabled: true
     scan_interval_minutes: 90
     request_delay_seconds: 3.0
-    sitemap_slice_per_scan: 600
+    sitemap_slice_per_scan: 2000
     graphql_batch_size: 40
     slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, ugg, timberland]
@@ -115,7 +119,7 @@ retailers:
     enabled: true
     scan_interval_minutes: 90
     request_delay_seconds: 3.0
-    sitemap_slice_per_scan: 600
+    sitemap_slice_per_scan: 2000
     graphql_batch_size: 40
     slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, ugg, timberland]
