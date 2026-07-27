@@ -88,9 +88,12 @@ retailers:
       - /mehed
       - /naised
     sitemap_slice_per_scan: 400   # backlog product pages revisited per scan
-    slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
-                   converse, vans, hoka, saucony, reebok, air-, dunk, yeezy,
-                   samba, gazelle, campus, handball, spezial]
+    # Brand list is evidence-based (see BRAND-EVIDENCE note in README): kept are
+    # brands whose best observed live bid actually exceeded retail. Dropped
+    # asics/salomon/converse/hoka/saucony — their best case bid still sat below
+    # retail, so they can never clear the profit floor.
+    slug_filters: [nike, jordan, adidas, new-balance, puma, reebok,
+                   air-, dunk, yeezy, samba, gazelle, campus, handball, spezial]
 
   teamsport:
     enabled: true
@@ -105,19 +108,19 @@ retailers:
     scan_interval_minutes: 45
     request_delay_seconds: 2.5
     sitemap_slice_per_scan: 500   # ~= their whole filtered catalog
-    slug_filters: [nike, jordan, adidas, new-balance, newbalance, asics,
-                   salomon, puma, converse, vans, hoka, saucony, reebok, ugg]
+    slug_filters: [nike, jordan, adidas, new-balance, newbalance, puma, reebok]
 
   sportland:
     enabled: true
     scan_interval_minutes: 60     # biggest catalog; batched GraphQL queries
-    request_delay_seconds: 3.0
-    # carries the whole Sportland-group opportunity now that LV/LT are off:
-    # 40 per query -> ~125 requests per scan, covers the catalog in ~2 cycles
-    sitemap_slice_per_scan: 5000
+    request_delay_seconds: 4.0
+    # 5000 (125 back-to-back GraphQL batches) made them start dropping our
+    # connections on 2026-07-27 — verified afterwards that they still answer
+    # fine at low volume, so this is a rate ceiling, not a block. 1200 = 30
+    # batches per scan, which ran cleanly for hours.
+    sitemap_slice_per_scan: 1200
     graphql_batch_size: 40
-    slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
-                   converse, vans, hoka, saucony, reebok, ugg, timberland]
+    slug_filters: [nike, jordan, adidas, new_balance, puma, reebok]
 
   # sportsdirect.ee: NOT implemented — the site drops connections from
   # non-browser clients (Frasers bot wall, verified 2026-07-27). Respecting
@@ -133,11 +136,10 @@ retailers:
   sportland_lv:
     enabled: false
     scan_interval_minutes: 90
-    request_delay_seconds: 3.0
-    sitemap_slice_per_scan: 2000
+    request_delay_seconds: 4.0
+    sitemap_slice_per_scan: 800   # see sportland note: keep group volume modest
     graphql_batch_size: 40
-    slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
-                   converse, vans, hoka, saucony, reebok, ugg, timberland]
+    slug_filters: [nike, jordan, adidas, new_balance, puma, reebok]
 
   sportland_lt:
     # ENABLED: reachable via a contact in Lithuania who can reship. Set
@@ -149,11 +151,10 @@ retailers:
     extra_cost_eur: 0.0
     buy_note: "LT store — needs reshipping via your LT contact (set extra_cost_eur)"
     scan_interval_minutes: 90
-    request_delay_seconds: 3.0
-    sitemap_slice_per_scan: 2000
+    request_delay_seconds: 4.0
+    sitemap_slice_per_scan: 800   # see sportland note: keep group volume modest
     graphql_batch_size: 40
-    slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
-                   converse, vans, hoka, saucony, reebok, ugg, timberland]
+    slug_filters: [nike, jordan, adidas, new_balance, puma, reebok]
 
   # ---- Tier 3: EU (least frequent; big robots crawl-delays honored) ----
   sns:
