@@ -151,16 +151,18 @@ class RetailerScraper(ABC):
 
     # -- sitemap helpers (for retailers whose catalog comes from sitemaps) ----
     async def cached_sitemap_slugs(self, sitemap_urls: list[str],
-                                   loc_pattern: str) -> list[str]:
+                                   loc_pattern: str,
+                                   max_sitemaps: int = 20) -> list[str]:
         """Product slugs from sitemaps, cached in SQLite for
-        cfg.sitemap_refresh_hours so big XML files aren't refetched per scan."""
+        cfg.sitemap_refresh_hours so big XML files aren't refetched per scan.
+        Capped: some stores paginate into dozens of sitemap files."""
         key = f"sitemap:{self.name}"
         if self.db is not None and (raw := self.db.kv_get(key)):
             data = json.loads(raw)
             if time.time() - data["fetched_at"] < self.cfg.sitemap_refresh_hours * 3600:
                 return data["slugs"]
         slugs: list[str] = []
-        for url in sitemap_urls:
+        for url in sitemap_urls[:max_sitemaps]:
             xml = await self.fetcher.get(url)
             if not xml:
                 continue

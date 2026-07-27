@@ -8,6 +8,7 @@ from .ballzy import BallzyScraper
 from .rademar import RademarScraper
 from .reede import ReedeScraper
 from .footshop import FootshopScraper
+from .overkill import OverkillScraper
 from .sns import SnsScraper
 from .sportland import SportlandLTScraper, SportlandLVScraper, SportlandScraper
 from .teamsport import TeamsportScraper
@@ -27,6 +28,7 @@ _SCRAPERS: dict[str, type[RetailerScraper]] = {
     "sportland_lt": SportlandLTScraper,
     # Tier 3 — EU (least frequent; big robots crawl-delays honored)
     "sns": SnsScraper,                  # Shopify, per-size JSON-LD + GTINs
+    "overkill": OverkillScraper,        # Shopify; ships EE EUR13 via DHL
     "footshop": FootshopScraper,        # microdata; size stock unverified
     # stadium.fi: homepage answers but the INTERSHOP catalog paths 403 plain
     # clients (verified 2026-07-27) — skipped per the no-anti-detection rule.

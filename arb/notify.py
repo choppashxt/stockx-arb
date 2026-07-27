@@ -49,8 +49,12 @@ def format_opportunity(o: Opportunity, reason: str) -> str:
         header,
         size_line,
         f"Retail: {o.retail.retailer} €{o.retail.price:.2f}"
+        + (f" (+€{o.retail.extra_cost_eur:.2f} reship = €{o.landed_cost:.2f})"
+           if o.retail.extra_cost_eur else "")
         + ("" if o.retail.price_verified else " (grid price, verify)"),
     ]
+    if o.retail.buy_note:
+        lines.append(f"📦 {o.retail.buy_note}")
     if o.retail.stock_note:
         lines.append(f"⚠ {o.retail.stock_note}")
     lines += [

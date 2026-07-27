@@ -49,6 +49,11 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
         stats.products_seen = len(products)
         log.info("%s: %d products scraped", retailer_name, len(products))
 
+        rcfg = cfg.retailers[retailer_name]
+        for p in products:      # stamp landed-cost extras onto every record
+            p.extra_cost_eur = rcfg.extra_cost_eur
+            p.buy_note = rcfg.buy_note or None
+
         for product in products:
             db.upsert_retail_product(product)
 
@@ -140,7 +145,8 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         used_call = True
 
     # any size worth a closer look at all? (product-level, before per-size work)
-    if not _any_upside(product.price, fresh.values(), cfg):
+    if not _any_upside(product.price + product.extra_cost_eur,
+                       fresh.values(), cfg):
         return [], used_call
 
     # product-page confirmation BEFORE size matching: the grid only has EU
@@ -213,7 +219,8 @@ def _any_upside(retail_price: float, markets, cfg: AppConfig) -> bool:
     """Could ANY variant clear min_profit at this retail price? Cheap gate so we
     only spend product-page requests (and per-size work) on plausible items."""
     for market in markets:
-        sell_now, list_ask = scenarios(retail_price, market, cfg.profit, cfg.vat)
+        sell_now, list_ask = scenarios(retail_price, market, cfg.profit,
+                                       cfg.vat)
         if _gate_profit(sell_now, list_ask, cfg) >= cfg.filters.min_profit_eur:
             return True
     return False
@@ -242,7 +249,9 @@ def _match_variant(us_size: Optional[str], eu_label: Optional[str], variants):
 def _build_opportunity(product: Product, size_label: str, us_size: str,
                        sx_product, variant, market: MarketData,
                        confidence: float, cfg: AppConfig) -> Optional[Opportunity]:
-    sell_now, list_ask = scenarios(product.price, market, cfg.profit, cfg.vat)
+    # profit is judged on LANDED cost (price + any reshipping/forwarding)
+    landed = product.price + product.extra_cost_eur
+    sell_now, list_ask = scenarios(landed, market, cfg.profit, cfg.vat)
     if sell_now is None and list_ask is None:
         return None        # null market data: logged by provider, skip cleanly
 

@@ -86,6 +86,11 @@ class RetailerConfig(BaseModel):
     enabled: bool = True
     scan_interval_minutes: int = 30
     request_delay_seconds: float = 2.5
+    # Landed-cost realism: anything that isn't a plain "order it, it arrives"
+    # purchase costs extra money and time. extra_cost_eur is added to the buy
+    # price before profit is computed, and buy_note is shown on every alert.
+    extra_cost_eur: float = 0.0
+    buy_note: str = ""
     categories: list[str] = Field(default_factory=list)
     max_pages: int = 50
     # sitemap-driven retailers: how many backlog products to (re)visit per scan

@@ -43,6 +43,8 @@ class Product(BaseModel):
                                         # per-size stock (e.g. Sportland): alert
                                         # at product level, clearly labeled
     stock_note: Optional[str] = None    # freeform availability note for alerts
+    buy_note: Optional[str] = None      # e.g. "via LT reshipper" — shown on alerts
+    extra_cost_eur: float = 0.0         # reshipping/forwarding cost per unit
     scraped_at: datetime = Field(default_factory=utcnow)
 
 
@@ -120,6 +122,11 @@ class Opportunity(BaseModel):
         if self.key_override:
             return self.key_override
         return f"{self.retail.retailer}|{self.variant.variant_id}|{self.size_label}"
+
+    @property
+    def landed_cost(self) -> float:
+        """What the shoe actually costs you delivered, before StockX fees."""
+        return self.retail.price + self.retail.extra_cost_eur
 
     @property
     def best_profit(self) -> float:

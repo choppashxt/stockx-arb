@@ -124,7 +124,14 @@ retailers:
                    converse, vans, hoka, saucony, reebok, ugg, timberland]
 
   sportland_lt:
-    enabled: false                # see sportland_lv note above
+    # ENABLED: reachable via a contact in Lithuania who can reship. Set
+    # extra_cost_eur to whatever that arrangement actually costs per pair —
+    # it is added to the buy price BEFORE profit is judged, so a EUR10 floor
+    # stays a real EUR10 in your pocket. Left at 0 until you know the number;
+    # until then LT profits are optimistic by exactly the reship cost.
+    enabled: true
+    extra_cost_eur: 0.0
+    buy_note: "LT store — needs reshipping via your LT contact (set extra_cost_eur)"
     scan_interval_minutes: 90
     request_delay_seconds: 3.0
     sitemap_slice_per_scan: 2000
@@ -142,6 +149,20 @@ retailers:
     sitemap_slice_per_scan: 25
     slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, yeezy, dunk, samba]
+
+  overkill:
+    # Berlin boutique; hype-heavy stock. Ships to Estonia: DHL EUR13, 2-5 days
+    # (verified on their shipping page 2026-07-27) — charged as landed cost.
+    enabled: true
+    scan_interval_minutes: 120
+    request_delay_seconds: 4.0
+    extra_cost_eur: 13.0
+    buy_note: "Berlin — DHL to EE ~EUR13, 2-5 days (already in the profit figure)"
+    categories:
+      - /collections/sale
+    sitemap_slice_per_scan: 120
+    slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
+                   converse, vans, hoka, saucony, reebok, dunk, samba, yeezy]
 
   footshop:
     # DISABLED 2026-07-27: product pages answered 200 at first, then every
