@@ -56,8 +56,17 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
             p.extra_cost_eur = rcfg.extra_cost_eur
             p.buy_note = rcfg.buy_note or None
 
+        # A retail discount is the single biggest reason something becomes
+        # arbitrageable, so it must override the bid-refresh tier: these get
+        # live market data this scan, not a day-old snapshot.
+        changed: set[tuple[str, str]] = set()
         for product in products:
-            db.upsert_retail_product(product)
+            flags = db.upsert_retail_product(product)
+            if flags["price_dropped"] or flags["is_new"] or flags["restocked"]:
+                changed.add((product.retailer, product.url))
+        if changed:
+            log.info("%s: %d new/discounted/restocked -> forcing fresh bids",
+                     retailer_name, len(changed))
 
         candidates = [p for p in products if _cheap_screen(p, cfg)]
         if limit:
@@ -70,7 +79,8 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
             try:
                 opportunities, used_market_call = await _evaluate_product(
                     product, cfg, db, resolver, provider, scraper,
-                    allow_market_call=market_calls < cfg.stockx.market_calls_per_scan)
+                    allow_market_call=market_calls < cfg.stockx.market_calls_per_scan,
+                    force_fresh=(product.retailer, product.url) in changed)
             except BudgetExhausted as e:
                 log.warning("stopping scan early: %s", e)
                 break
@@ -112,7 +122,8 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
                             resolver: CatalogResolver,
                             provider: MarketDataProvider,
                             scraper: Optional[RetailerScraper],
-                            allow_market_call: bool
+                            allow_market_call: bool,
+                            force_fresh: bool = False
                             ) -> tuple[list[Opportunity], bool]:
     """All profitable size-level opportunities for one retail product."""
     candidates = style_code_candidates_from_sku(product.style_code or "")
@@ -135,7 +146,7 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
 
     # market data: cached snapshots first, one API call per product otherwise.
     # How stale is acceptable depends on how close this SKU came last time.
-    ttl = _market_ttl_minutes(db, sx_product.product_id, cfg)
+    ttl = 0 if force_fresh else _market_ttl_minutes(db, sx_product.product_id, cfg)
     fresh = {
         v.variant_id: md for v in variants
         if (md := db.get_market_snapshot(v.variant_id, ttl)) is not None
@@ -152,6 +163,18 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
     best = _best_upside(landed, fresh.values(), cfg)
     db.put_watch(sx_product.product_id,
                  None if best == float("-inf") else best)
+
+    # An alert must never rest on a stale bid. If cached data says this looks
+    # profitable, confirm against live market data before going any further —
+    # a bid from yesterday is a suggestion, not something to spend money on.
+    if best >= cfg.filters.min_profit_eur and not used_call:
+        if not allow_market_call:
+            return [], False
+        fresh = await provider.get_market_data(sx_product.product_id)
+        used_call = True
+        best = _best_upside(landed, fresh.values(), cfg)
+        db.put_watch(sx_product.product_id,
+                     None if best == float("-inf") else best)
 
     # any size worth a closer look at all? (product-level, before per-size work)
     if best < cfg.filters.min_profit_eur:
