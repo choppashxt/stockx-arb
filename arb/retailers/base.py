@@ -35,12 +35,29 @@ USER_AGENT = ("sneaker-arb-scanner/0.1 (personal hobby price comparison; "
 
 
 class PoliteFetcher:
+    # stop pestering a host that is refusing us: after this many consecutive
+    # failed responses the host is dropped for the rest of the run
+    MAX_CONSECUTIVE_FAILURES = 5
+
     def __init__(self, base_delay_s: float):
         self.base_delay_s = base_delay_s
         self._http = httpx.AsyncClient(
             timeout=30, follow_redirects=True, headers={"User-Agent": USER_AGENT})
         self._robots: dict[str, Optional[urllib.robotparser.RobotFileParser]] = {}
         self._last_request_at: dict[str, float] = {}
+        self._consecutive_failures: dict[str, int] = {}
+        self._given_up: set[str] = set()
+
+    def _note_failure(self, host: str, why: str) -> None:
+        n = self._consecutive_failures.get(host, 0) + 1
+        self._consecutive_failures[host] = n
+        if n >= self.MAX_CONSECUTIVE_FAILURES and host not in self._given_up:
+            self._given_up.add(host)
+            log.warning("%s failed %d requests in a row (%s) — giving up on it "
+                        "for this run", host, n, why)
+
+    def _note_success(self, host: str) -> None:
+        self._consecutive_failures[host] = 0
 
     async def close(self) -> None:
         await self._http.aclose()
@@ -87,6 +104,8 @@ class PoliteFetcher:
         """Fetch a page politely. None on any refusal — caller skips, never retries
         harder."""
         host = urlparse(url).netloc
+        if host in self._given_up:
+            return None
         rp = await self._robots_for(host)
         if rp is None:
             return None
@@ -99,19 +118,24 @@ class PoliteFetcher:
             resp = await self._http.get(url)
         except httpx.HTTPError as e:
             log.warning("request failed for %s: %s", url, e)
+            self._note_failure(host, str(e)[:60])
             return None
         if resp.status_code == 403:
             log.warning("%s returned 403 — not retrying this run", host)
+            self._given_up.add(host)
             return None
         if resp.status_code == 429:
             log.warning("%s rate-limited us (429) — backing off 60s once", host)
             await asyncio.sleep(60)
             resp = await self._http.get(url)
             if resp.status_code != 200:
+                self._note_failure(host, "429")
                 return None
         if resp.status_code != 200:
             log.info("%s returned HTTP %s", url, resp.status_code)
+            self._note_failure(host, f"HTTP {resp.status_code}")
             return None
+        self._note_success(host)
         return resp.text
 
 

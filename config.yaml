@@ -136,9 +136,15 @@ retailers:
                    converse, vans, hoka, saucony, reebok, yeezy, dunk, samba]
 
   footshop:
-    enabled: true
+    # DISABLED 2026-07-27: product pages answered 200 at first, then every
+    # request (even previously-working URLs) started returning a 400 block
+    # page — Cloudflare refusing non-browser clients. Their robots.txt sets no
+    # Crawl-delay for "*", so this wasn't a politeness failure; getting past it
+    # would mean browser-fingerprint spoofing, which this project doesn't do.
+    # Flip to true to retest later; the scraper itself works.
+    enabled: false
     scan_interval_minutes: 120
-    request_delay_seconds: 5.0    # robots Crawl-delay: 5
+    request_delay_seconds: 10.0
     categories:
       - /en/sale                  # sale listing page 1
     sitemap_slice_per_scan: 50
