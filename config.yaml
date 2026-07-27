@@ -1,0 +1,146 @@
+# All tunables live here. Secrets live in .env (see .env.example).
+# Every value shown is the default the code falls back to if the key is removed.
+
+db_path: state.db
+
+profit:
+  transaction_fee_pct: 0.095      # StockX seller Level 1
+  processing_fee_pct: 0.03
+  shipping_to_stockx_eur: 7.00    # flat label cost per unit, Estonia -> Eindhoven
+  undercut_eur: 0.00              # list_ask scenario: undercut lowest ask by this much
+
+vat:
+  # Kept fully isolated in profit.vat_wedge(). Flipping enabled touches nothing else.
+  enabled: false
+  rate: 0.24                      # Estonia standard rate
+  input_vat_reclaimable: false    # can you reclaim VAT paid on the retail purchase?
+  output_vat_on_sale: false       # do you owe VAT out of the StockX sale price?
+
+filters:
+  min_profit_eur: 25.0            # net profit that must be cleared
+  require_live_bid: true          # profit is judged on the SELL NOW payout
+                                  # (highest bid); items where only the
+                                  # list-at-ask scenario is profitable stay quiet
+  max_retail_price_eur: 500.0     # skip items costing more than this
+  alert_min_confidence: 0.90      # below this -> review queue, never a firm alert
+  # Liquidity floors. The official StockX API exposes NO bid/ask counts or sales
+  # velocity, so these only apply when the market-data provider supplies them
+  # (e.g. a future KicksDB provider). strict_liquidity: true would skip items
+  # whose provider can't report these fields at all.
+  min_bids: 1
+  min_sales_72h: 0
+  strict_liquidity: false
+
+alerts:
+  max_per_scan: 10                # per-opportunity messages per scan; rest summarized
+  re_alert_profit_delta_eur: 10.0 # re-alert an already-seen opportunity if profit moves this much
+
+stockx:
+  currency: EUR
+  daily_request_budget: 20000     # self-imposed cap under the 25 000/24h hard limit
+  min_request_interval_s: 1.05    # hard limit is 1 req/s
+  market_refresh_minutes: 60      # reuse market snapshots younger than this
+  market_calls_per_scan: 150      # max market-data product fetches per scan
+  max_new_resolutions_per_scan: 300  # style codes resolved (searched) per scan
+  negative_cache_days: 3          # re-try style codes that resolved to nothing after this
+
+notifications:
+  method: discord                 # discord | telegram | console
+                                  # --dry-run always overrides to console
+
+retailers:
+  # ---- Tier 1: Estonia (most frequent scans) ----
+  ballzy:
+    enabled: true
+    scan_interval_minutes: 30
+    request_delay_seconds: 2.5    # robots.txt asks Crawl-delay: 2; stay above it
+    categories:
+      - /en/men/sneakers
+      - /en/women/sneakers
+    max_pages: 50                 # per category; 60 products per page
+
+  reede:
+    enabled: true
+    scan_interval_minutes: 30
+    request_delay_seconds: 2.5
+    categories:                   # page 1 of each is scanned every cycle (fresh)
+      - /soodus                   # sale — where the money is
+      - /mehed
+      - /naised
+    sitemap_slice_per_scan: 100   # backlog product pages revisited per scan
+    slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
+                   converse, vans, hoka, saucony, reebok, air-, dunk, yeezy,
+                   samba, gazelle, campus, handball, spezial]
+
+  teamsport:
+    enabled: true
+    scan_interval_minutes: 45
+    request_delay_seconds: 2.5
+    categories:
+      - /ee/category              # full grid; tiles carry style codes + prices
+    max_pages: 80
+
+  rademar:
+    enabled: true
+    scan_interval_minutes: 45
+    request_delay_seconds: 2.5
+    sitemap_slice_per_scan: 120
+    slug_filters: [nike, jordan, adidas, new-balance, newbalance, asics,
+                   salomon, puma, converse, vans, hoka, saucony, reebok, ugg]
+
+  sportland:
+    enabled: true
+    scan_interval_minutes: 60     # biggest catalog; batched GraphQL queries
+    request_delay_seconds: 3.0
+    sitemap_slice_per_scan: 800   # 40 per query -> ~20 requests per scan
+    graphql_batch_size: 40
+    slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
+                   converse, vans, hoka, saucony, reebok, ugg, timberland]
+
+  # sportsdirect.ee: NOT implemented — the site drops connections from
+  # non-browser clients (Frasers bot wall, verified 2026-07-27). Respecting
+  # the no-anti-detection guardrail means it stays out until they open up.
+
+  # ---- Tier 2: Baltics (same Sportland platform; scanned less often) ----
+  sportland_lv:
+    enabled: true
+    scan_interval_minutes: 90
+    request_delay_seconds: 3.0
+    sitemap_slice_per_scan: 600
+    graphql_batch_size: 40
+    slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
+                   converse, vans, hoka, saucony, reebok, ugg, timberland]
+
+  sportland_lt:
+    enabled: true
+    scan_interval_minutes: 90
+    request_delay_seconds: 3.0
+    sitemap_slice_per_scan: 600
+    graphql_batch_size: 40
+    slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
+                   converse, vans, hoka, saucony, reebok, ugg, timberland]
+
+  # ---- Tier 3: EU (least frequent; big robots crawl-delays honored) ----
+  sns:
+    enabled: true
+    scan_interval_minutes: 120
+    request_delay_seconds: 10.0   # robots Crawl-delay: 10
+    categories:
+      - /collections/sale         # fresh discounts every scan
+    sitemap_slice_per_scan: 25
+    slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
+                   converse, vans, hoka, saucony, reebok, yeezy, dunk, samba]
+
+  footshop:
+    enabled: true
+    scan_interval_minutes: 120
+    request_delay_seconds: 5.0    # robots Crawl-delay: 5
+    categories:
+      - /en/sale                  # sale listing page 1
+    sitemap_slice_per_scan: 50
+    slug_filters: [sneakers, shoes]   # matches the category segment in slugs
+
+  # NOT implemented (probed 2026-07-27):
+  # stadium.fi        homepage OK but catalog paths 403 plain clients (Akamai)
+  # endclothing/bstn  Magento+Next behind Akamai — fragile, revisit on demand
+  # zalando/aboutyou  no usable public feed / partner-API only — skipped

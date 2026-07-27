@@ -1,0 +1,105 @@
+"""Style-code normalization and retail->StockX match scoring.
+
+Correctness is paramount: a wrong match means buying the wrong shoe.
+Bias toward "don't alert" — anything below firm confidence goes to the
+review queue instead of an alert.
+"""
+from __future__ import annotations
+
+import re
+from typing import Optional
+
+# Tokens that are sizes, not part of a style code.
+_SHOE_SIZE = re.compile(r"^\d{1,2}(\.5)?$")            # 4 .. 16, halves
+_APPAREL_SIZE = re.compile(r"^(2?X{0,3}S|S|M|L|X{1,3}L|2XL|3XL|4XL|OS|ONE|0)$", re.I)
+
+
+def normalize_style_code(code: str) -> str:
+    """Canonical form for comparisons: uppercase, alphanumerics only."""
+    return re.sub(r"[^A-Z0-9]", "", code.upper())
+
+
+def style_code_candidates_from_sku(sku: str) -> list[str]:
+    """Derive manufacturer style-code candidates from a retailer SKU like
+    'HQ2010_005_8.5_CNF' (Ballzy: style code + size + configurable marker).
+
+    Returns display-form candidates, most specific first. Ambiguous trailing
+    numeric tokens (size vs. color code) yield multiple candidates; the StockX
+    exact styleId comparison decides which one is real.
+    """
+    tokens = [t.strip() for t in re.split(r"[_\s]+", sku.strip()) if t.strip()]
+    if tokens and tokens[-1].upper() == "CNF":
+        tokens = tokens[:-1]
+    if not tokens:
+        return []
+
+    candidates: list[list[str]] = []
+
+    def push(toks: list[str]) -> None:
+        if toks and toks not in candidates:
+            candidates.append(toks)
+
+    rest = list(tokens)
+    # strip a waist/length pair (apparel, e.g. ..._30_32)
+    if len(rest) >= 3 and rest[-1].isdigit() and rest[-2].isdigit() \
+            and len(rest[-1]) == 2 and len(rest[-2]) == 2:
+        push(rest[:-2])
+    # strip one apparel size
+    if len(rest) >= 2 and _APPAREL_SIZE.match(rest[-1]):
+        push(rest[:-1])
+    # strip one shoe size — and, if the next token is also size-like (rare,
+    # ambiguous color codes like '..._49_37.5'), keep both interpretations
+    if len(rest) >= 2 and _SHOE_SIZE.match(rest[-1]):
+        push(rest[:-1])
+        if len(rest) >= 3 and _SHOE_SIZE.match(rest[-2]):
+            push(rest[:-2])
+    push(rest)  # SKU may carry no size at all
+
+    # some brands' StockX styleId omits a trailing 3-4 digit color code
+    # (e.g. Vans VN000EBNBPN1-050 -> VN000EBNBPN1); exact styleId matching
+    # keeps the extra candidate safe
+    for c in list(candidates):
+        if len(c) >= 2 and c[-1].isdigit() and len(c[-1]) in (3, 4):
+            push(c[:-1])
+
+    return ["-".join(c) for c in candidates]
+
+
+def style_ids_match(retail_code: str, stockx_style_id: Optional[str]) -> bool:
+    """Exact match against a StockX styleId, tolerant of separator noise.
+    StockX sometimes packs several forms into one field ('DD1391-100/DD1391 100')."""
+    if not stockx_style_id:
+        return False
+    want = normalize_style_code(retail_code)
+    if not want:
+        return False
+    parts = re.split(r"[/,]", stockx_style_id)
+    return any(normalize_style_code(p) == want for p in parts if p.strip())
+
+
+def size_match_confidence(retail_us: Optional[str], retail_eu: Optional[str],
+                          variant_us: Optional[str],
+                          variant_eu: Optional[str]) -> float:
+    """How sure are we the retail size row is this StockX variant?
+
+    1.0  = US sizes agree and the EU conversion doesn't contradict, OR the
+           retailer only gives EU and it equals StockX's own EU conversion for
+           this variant (the style code already pinned the exact product incl.
+           gender, so StockX's own size chart is authoritative, not a guess —
+           the caller must still reject the match if several variants share
+           the EU label)
+    0.0  = no safe mapping — never guess a size."""
+    if retail_us and variant_us:
+        if _num(retail_us) != _num(variant_us):
+            return 0.0
+        if retail_eu and variant_eu and _num(retail_eu) != _num(variant_eu):
+            return 0.5     # US matches but EU disagrees -> review, don't alert
+        return 1.0
+    if retail_eu and variant_eu:
+        return 1.0 if _num(retail_eu) == _num(variant_eu) else 0.0
+    return 0.0
+
+
+def _num(size: str) -> Optional[float]:
+    m = re.search(r"\d+(\.\d+)?", size.replace(",", "."))
+    return float(m.group(0)) if m else None
