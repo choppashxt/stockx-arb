@@ -45,6 +45,23 @@ class ProfitConfig(BaseModel):
     undercut_eur: float = 0.00
 
 
+class AliasConfig(BaseModel):
+    """Alias (GOAT's seller app) as a second sale venue.
+
+    Alias has no public API and its pages sit behind bot protection, so we
+    cannot read its prices automatically without evasion — which this project
+    does not do. Instead we model its fees, so every alert can state the price
+    Alias would have to pay to beat the StockX payout, plus a link to check it
+    by hand in seconds. Fees verified 2026-07-27 (alias.org/fees).
+    """
+
+    enabled: bool = True
+    commission_pct: float = 0.095   # seller rating >= 90 (everyone starts at 90)
+    cashout_pct: float = 0.029      # ACH / PayPal withdrawal
+    seller_fee_eur: float = 5.0     # region-dependent flat fee — CHECK YOURS
+    shipping_eur: float = 7.0       # your cost to get it to their hub
+
+
 class VatConfig(BaseModel):
     enabled: bool = False
     rate: float = 0.24
@@ -107,6 +124,7 @@ class RetailerConfig(BaseModel):
 class AppConfig(BaseModel):
     db_path: str = "state.db"
     profit: ProfitConfig = ProfitConfig()
+    alias: AliasConfig = AliasConfig()
     vat: VatConfig = VatConfig()
     filters: FilterConfig = FilterConfig()
     alerts: AlertConfig = AlertConfig()

@@ -354,7 +354,7 @@ async def _maybe_alert(opp: Opportunity, scraper: RetailerScraper, cfg: AppConfi
             opp.retail = confirmed
         db.upsert_retail_product(confirmed)
 
-    await notifier.send(format_opportunity(opp, reason))
+    await notifier.send(format_opportunity(opp, reason, cfg))
     db.record_alert(opp.key, _gate_profit(opp.sell_now, opp.list_ask, cfg),
                     opp.retail.in_stock, opp.model_dump_json())
     stats.alerts_sent += 1

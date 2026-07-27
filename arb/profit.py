@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .config import ProfitConfig, VatConfig
+from .config import AliasConfig, ProfitConfig, VatConfig
 from .models import MarketData, ProfitBreakdown
 
 
@@ -57,6 +57,23 @@ def scenarios(retail_price: float, market: MarketData, profit_cfg: ProfitConfig,
         ask_price = max(market.lowest_ask - profit_cfg.undercut_eur, 0.0)
         list_ask = breakdown("list_ask", ask_price, retail_price, profit_cfg, vat_cfg)
     return sell_now, list_ask
+
+
+def alias_payout(sale_price: float, alias: "AliasConfig") -> float:
+    """What Alias (GOAT) would pay you for a sale at this price."""
+    return (sale_price * (1 - alias.commission_pct - alias.cashout_pct)
+            - alias.seller_fee_eur - alias.shipping_eur)
+
+
+def alias_breakeven_price(target_payout: float, alias: "AliasConfig") -> Optional[float]:
+    """The Alias sale price needed to match a given payout (normally the
+    StockX one). Lets an alert say 'Alias must pay >= X to be worth it',
+    which is checkable by hand in the app in seconds — the best we can do
+    without an Alias API."""
+    keep = 1 - alias.commission_pct - alias.cashout_pct
+    if keep <= 0:
+        return None
+    return (target_payout + alias.seller_fee_eur + alias.shipping_eur) / keep
 
 
 def est_days_to_clear(market: MarketData) -> Optional[float]:

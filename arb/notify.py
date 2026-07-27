@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from typing import Optional
+from urllib.parse import quote_plus
 
 import httpx
 
 from .config import Secrets
 from .models import Opportunity, ProfitBreakdown
+from .profit import alias_breakeven_price
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +26,23 @@ def _fmt_scenario(b: ProfitBreakdown | None, tag: str) -> str:
             f"profit €{b.profit:+.2f} ({b.margin_pct * 100:+.0f}%)")
 
 
-def format_opportunity(o: Opportunity, reason: str) -> str:
+def _alias_line(o: Opportunity, cfg) -> Optional[str]:
+    """Alias has no API, so give the human the exact number to beat and a link
+    to check it in seconds."""
+    if cfg is None or not cfg.alias.enabled:
+        return None
+    best = o.sell_now or o.list_ask
+    if best is None:
+        return None
+    need = alias_breakeven_price(best.payout, cfg.alias)
+    if need is None:
+        return None
+    query = quote_plus(o.retail.style_code or o.stockx.title or "")
+    return (f"Alias: needs ≥ €{need:.0f} to beat StockX's €{best.payout:.2f} "
+            f"payout — check: https://www.goat.com/search?query={query}")
+
+
+def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
     """Skimmable act-now message (plain text; Telegram-safe after escaping)."""
     m = o.market
     liq_bits = [
@@ -69,6 +88,8 @@ def format_opportunity(o: Opportunity, reason: str) -> str:
         f"BUY: {o.retail.url}",
         f"StockX: {o.stockx.url}",
     ]
+    if (alias := _alias_line(o, cfg)):
+        lines.append(alias)
     return "\n".join(lines)
 
 

@@ -9,6 +9,18 @@ profit:
   shipping_to_stockx_eur: 7.00    # flat label cost per unit, Estonia -> Eindhoven
   undercut_eur: 0.00              # list_ask scenario: undercut lowest ask by this much
 
+alias:
+  # Alias = GOAT's seller app, as a SECOND place to sell the same pair.
+  # It has no public API and its pages are behind bot protection, so prices
+  # cannot be read automatically without evasion (which this project doesn't
+  # do). Instead every alert states the price Alias must pay to beat StockX,
+  # with a link to check it by hand. Fees verified 2026-07-27 (alias.org/fees).
+  enabled: true
+  commission_pct: 0.095     # seller rating >= 90; drops to 15/20/25% if rating falls
+  cashout_pct: 0.029        # ACH / PayPal withdrawal fee
+  seller_fee_eur: 5.0       # region-dependent flat fee — CHECK YOURS in the app
+  shipping_eur: 7.0         # your cost to ship to their hub
+
 vat:
   # Kept fully isolated in profit.vat_wedge(). Flipping enabled touches nothing else.
   enabled: false
