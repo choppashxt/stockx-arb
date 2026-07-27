@@ -72,6 +72,8 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
            if o.retail.extra_cost_eur else "")
         + ("" if o.retail.price_verified else " (grid price, verify)"),
     ]
+    if o.prefer_note:
+        lines.append(f"⭐ {o.prefer_note}")
     if o.retail.buy_note:
         lines.append(f"📦 {o.retail.buy_note}")
     if o.retail.stock_note:

@@ -6,6 +6,7 @@ The bot only finds and notifies. It never buys, lists, or transacts.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -315,8 +316,36 @@ def _liquidity_ok(market: MarketData, cfg: AppConfig) -> bool:
     return True
 
 
+def _attach_preferred_source(opp: Opportunity, cfg: AppConfig, db: Database) -> None:
+    """If a preferred sibling storefront also carries this shoe, say so on the
+    alert. Never suppresses the alert: the sibling frequently lacks the exact
+    size, and a missed opportunity is worse than an extra line of text."""
+    rc = cfg.retailers.get(opp.retail.retailer)
+    if not rc or not rc.prefer_retailer or not opp.retail.style_code:
+        return
+    alt = db.find_by_style_code(rc.prefer_retailer, opp.retail.style_code)
+    if not alt or not alt["in_stock"]:
+        return
+    try:
+        sizes = json.loads(alt["sizes_json"] or "[]")
+    except json.JSONDecodeError:
+        sizes = []
+    in_stock = [s["label"] for s in sizes if s.get("in_stock")]
+    if in_stock:
+        has = ("HAS EU " + opp.size_label if opp.size_label in in_stock
+               else f"sizes: {', '.join(in_stock[:8])}")
+    else:
+        has = "size availability unknown — check"
+    saving = ""
+    if opp.retail.extra_cost_eur:
+        saving = f", saves €{opp.retail.extra_cost_eur:.0f} reshipping"
+    opp.prefer_note = (f"BUY HERE FIRST → {rc.prefer_retailer} "
+                       f"€{alt['price']:.2f} ({has}{saving}): {alt['url']}")
+
+
 async def _maybe_alert(opp: Opportunity, scraper: RetailerScraper, cfg: AppConfig,
                        db: Database, notifier: Notifier, stats: ScanStats) -> None:
+    _attach_preferred_source(opp, cfg, db)
     gate_profit = _gate_profit(opp.sell_now, opp.list_ask, cfg)
     should, reason = db.should_alert(opp.key, gate_profit, opp.retail.in_stock,
                                      cfg.alerts.re_alert_profit_delta_eur)

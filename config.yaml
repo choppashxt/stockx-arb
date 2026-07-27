@@ -150,6 +150,10 @@ retailers:
     enabled: true
     extra_cost_eur: 0.0
     buy_note: "LT store — needs reshipping via your LT contact (set extra_cost_eur)"
+    # .ee is always preferable (no reshipping), but LT is never suppressed —
+    # the storefronts share a catalog and price while stock differs per country,
+    # and LT routinely has sizes .ee does not.
+    prefer_retailer: sportland
     scan_interval_minutes: 90
     request_delay_seconds: 4.0
     sitemap_slice_per_scan: 800   # see sportland note: keep group volume modest

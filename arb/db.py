@@ -147,6 +147,14 @@ class Database:
         self.conn.commit()
         return flags
 
+    def find_by_style_code(self, retailer: str, style_code: str) -> Optional[dict]:
+        """Same shoe at another storefront, if we've seen it there."""
+        row = self.conn.execute(
+            "SELECT name, price, currency, in_stock, url, sizes_json "
+            "FROM retail_products WHERE retailer=? AND style_code=? LIMIT 1",
+            (retailer, style_code)).fetchone()
+        return dict(row) if row else None
+
     # -- stockx catalog cache ------------------------------------------------
     def get_resolution(self, cache_key: str, negative_ttl_days: int
                        ) -> Optional[tuple[Optional[StockXProduct], float]]:

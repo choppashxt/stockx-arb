@@ -109,6 +109,11 @@ class RetailerConfig(BaseModel):
     # price before profit is computed, and buy_note is shown on every alert.
     extra_cost_eur: float = 0.0
     buy_note: str = ""
+    # A sibling storefront that is always preferable to buy from (same catalog
+    # and price, but no reshipping). Alerts from this retailer will point at
+    # the sibling when it also has the shoe — without being suppressed, since
+    # the sibling often lacks the exact size.
+    prefer_retailer: str = ""
     categories: list[str] = Field(default_factory=list)
     max_pages: int = 50
     # sitemap-driven retailers: how many backlog products to (re)visit per scan
