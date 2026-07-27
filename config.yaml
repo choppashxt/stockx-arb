@@ -96,7 +96,9 @@ retailers:
     enabled: true
     scan_interval_minutes: 60     # biggest catalog; batched GraphQL queries
     request_delay_seconds: 3.0
-    sitemap_slice_per_scan: 2500  # 40 per query -> ~63 requests per scan
+    # carries the whole Sportland-group opportunity now that LV/LT are off:
+    # 40 per query -> ~125 requests per scan, covers the catalog in ~2 cycles
+    sitemap_slice_per_scan: 5000
     graphql_batch_size: 40
     slug_filters: [nike, jordan, adidas, new_balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, ugg, timberland]
@@ -105,9 +107,15 @@ retailers:
   # non-browser clients (Frasers bot wall, verified 2026-07-27). Respecting
   # the no-anti-detection guardrail means it stays out until they open up.
 
-  # ---- Tier 2: Baltics (same Sportland platform; scanned less often) ----
+  # ---- Tier 2: Baltics ----
+  # DISABLED 2026-07-27: you cannot check out from the LV/LT storefronts from
+  # Estonia, so their alerts carry buy links you cannot use. They are also
+  # redundant — all three Sportland sites share one catalog at identical prices
+  # (verified: HF9190-001 is EUR69.99 in stock on .ee, .lv and .lt alike), so
+  # sportland.ee finds the same deals with a link you can actually buy from.
+  # Only per-country STOCK differs. Re-enable if you ever get LV/LT delivery.
   sportland_lv:
-    enabled: true
+    enabled: false
     scan_interval_minutes: 90
     request_delay_seconds: 3.0
     sitemap_slice_per_scan: 2000
@@ -116,7 +124,7 @@ retailers:
                    converse, vans, hoka, saucony, reebok, ugg, timberland]
 
   sportland_lt:
-    enabled: true
+    enabled: false                # see sportland_lv note above
     scan_interval_minutes: 90
     request_delay_seconds: 3.0
     sitemap_slice_per_scan: 2000
