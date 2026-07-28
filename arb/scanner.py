@@ -189,11 +189,22 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         if confirmed is None:
             log.info("could not confirm %s — skipping", product.url)
             return [], used_call
+        # enrich() builds a NEW Product from the page, so the landed-cost
+        # policy stamped in run_scan (your discounts, promos, forwarding costs)
+        # would be silently dropped here — carrying it across is what keeps a
+        # configured discount from quietly doing nothing.
+        confirmed.discount_pct = product.discount_pct
+        confirmed.sale_discount_pct = product.sale_discount_pct
+        confirmed.extra_cost_eur = product.extra_cost_eur
+        confirmed.buy_note = product.buy_note
+        confirmed.on_sale = confirmed.on_sale or product.on_sale
+        if confirmed.list_price is None:
+            confirmed.list_price = product.list_price
         product = confirmed
         db.upsert_retail_product(confirmed)
         if not product.in_stock or product.price > cfg.filters.max_retail_price_eur:
             return [], used_call
-        if not _any_upside(product.price, fresh.values(), cfg):
+        if not _any_upside(product.landed_cost, fresh.values(), cfg):
             return [], used_call
 
     sizes = product.sizes

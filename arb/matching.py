@@ -137,6 +137,20 @@ def _sizes_equal(a: str, b: str) -> bool:
     return la is not None and la == lb
 
 
+# adidas sizes come as "EU 44 2/3" / "42 1/3". Without this, the plain number
+# regex reads "44 2/3" as 44 and happily matches it to EU 44 — a different
+# shoe size, and a different pair in the box.
+_FRACTION_RE = re.compile(r"(\d+)\s+(\d)\s*/\s*(\d)")
+_UNICODE_FRACTIONS = {"⅓": " 1/3", "⅔": " 2/3", "½": " 1/2",
+                      "¼": " 1/4", "¾": " 3/4"}
+
+
 def _num(size: str) -> Optional[float]:
-    m = re.search(r"\d+(\.\d+)?", size.replace(",", "."))
+    s = size.replace(",", ".")
+    for glyph, ascii_form in _UNICODE_FRACTIONS.items():
+        s = s.replace(glyph, ascii_form)
+    if (m := _FRACTION_RE.search(s)):
+        whole, num, den = float(m.group(1)), float(m.group(2)), float(m.group(3))
+        return whole + num / den if den else whole
+    m = re.search(r"\d+(\.\d+)?", s)
     return float(m.group(0)) if m else None
