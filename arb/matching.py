@@ -90,14 +90,51 @@ def size_match_confidence(retail_us: Optional[str], retail_eu: Optional[str],
            the EU label)
     0.0  = no safe mapping — never guess a size."""
     if retail_us and variant_us:
-        if _num(retail_us) != _num(variant_us):
+        if not _sizes_equal(retail_us, variant_us):
             return 0.0
-        if retail_eu and variant_eu and _num(retail_eu) != _num(variant_eu):
+        if retail_eu and variant_eu and not _sizes_equal(retail_eu, variant_eu):
             return 0.5     # US matches but EU disagrees -> review, don't alert
         return 1.0
     if retail_eu and variant_eu:
-        return 1.0 if _num(retail_eu) == _num(variant_eu) else 0.0
+        return 1.0 if _sizes_equal(retail_eu, variant_eu) else 0.0
     return 0.0
+
+
+_LETTER_SIZES = {
+    "XXS": "XXS", "2XS": "XXS",
+    "XS": "XS",
+    "S": "S", "SMALL": "S",
+    "M": "M", "MEDIUM": "M",
+    "L": "L", "LARGE": "L",
+    "XL": "XL", "1X": "XL",
+    "XXL": "XXL", "2XL": "XXL", "2X": "XXL",
+    "XXXL": "XXXL", "3XL": "XXXL", "3X": "XXXL",
+    "OS": "OS", "ONE SIZE": "OS", "OSFA": "OS",
+}
+
+
+def _letter(size: str) -> Optional[str]:
+    """Normalize an apparel size, or None if it isn't one."""
+    key = re.sub(r"[^A-Z0-9 ]", "", size.strip().upper())
+    return _LETTER_SIZES.get(key)
+
+
+def _sizes_equal(a: str, b: str) -> bool:
+    """Do these two size labels denote the same size?
+
+    Numeric sizes compare numerically ("EU 44" == "44"). Apparel sizes compare
+    as normalized letters ("Large" == "L", but L != M). Critically, two labels
+    that are merely both non-numeric are NOT equal: _num returns None for both
+    "L" and "M", and treating that as a match would sell an S into an XL bid.
+    Anything unrecognised returns False — never guess a size.
+    """
+    na, nb = _num(a), _num(b)
+    if na is not None and nb is not None:
+        return na == nb
+    if na is not None or nb is not None:
+        return False              # one numeric, one not: not comparable
+    la, lb = _letter(a), _letter(b)
+    return la is not None and la == lb
 
 
 def _num(size: str) -> Optional[float]:
