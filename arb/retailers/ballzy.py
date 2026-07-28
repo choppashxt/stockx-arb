@@ -114,6 +114,8 @@ class BallzyScraper(RetailerScraper):
             sizes=sizes,
             in_stock=bool(sizes),
             price_verified=False,
+            on_sale=discount > 0,          # drives the sale-only checkout promo
+            list_price=regular if discount > 0 else None,
         )
 
     # -- product-page confirmation ------------------------------------------

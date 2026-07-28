@@ -46,13 +46,23 @@ class Product(BaseModel):
     buy_note: Optional[str] = None      # e.g. "via LT reshipper" — shown on alerts
     extra_cost_eur: float = 0.0         # reshipping/forwarding cost per unit
     discount_pct: float = 0.0           # your standing discount at this shop
+    sale_discount_pct: float = 0.0      # extra % off, SALE ITEMS ONLY
+    on_sale: bool = False               # is this item actually marked down?
+    list_price: Optional[float] = None  # pre-markdown price, when known
 
     @property
     def landed_cost(self) -> float:
-        """What this actually costs you delivered: listed price less any
-        standing discount you get at this shop, plus any forwarding cost.
-        Single source of truth — every profit calculation goes through here."""
-        return self.price * (1 - self.discount_pct) + self.extra_cost_eur
+        """What this actually costs you delivered.
+
+        Listed price, less any standing discount you get at this shop, less any
+        extra checkout discount that applies ONLY to marked-down items, plus
+        any forwarding cost. Single source of truth — every profit calculation
+        goes through here, so a promo can never be applied to full-price stock.
+        """
+        price = self.price * (1 - self.discount_pct)
+        if self.on_sale and self.sale_discount_pct:
+            price *= (1 - self.sale_discount_pct)
+        return price + self.extra_cost_eur
     scraped_at: datetime = Field(default_factory=utcnow)
 
 

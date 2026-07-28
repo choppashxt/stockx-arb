@@ -55,6 +55,7 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
         for p in products:      # stamp landed-cost adjustments onto every record
             p.extra_cost_eur = rcfg.extra_cost_eur
             p.discount_pct = rcfg.discount_pct
+            p.sale_discount_pct = rcfg.sale_discount_pct
             p.buy_note = rcfg.buy_note or None
 
         # A retail discount is the single biggest reason something becomes

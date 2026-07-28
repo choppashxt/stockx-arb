@@ -69,6 +69,8 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
         size_line,
         f"Retail: {o.retail.retailer} €{o.retail.price:.2f}"
         + (f" −{o.retail.discount_pct*100:.0f}%" if o.retail.discount_pct else "")
+        + (f" −{o.retail.sale_discount_pct*100:.0f}% sale promo"
+           if (o.retail.on_sale and o.retail.sale_discount_pct) else "")
         + (f" +€{o.retail.extra_cost_eur:.2f} ship" if o.retail.extra_cost_eur else "")
         + (f" = €{o.landed_cost:.2f} to you"
            if (o.retail.discount_pct or o.retail.extra_cost_eur) else "")

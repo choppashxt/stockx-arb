@@ -120,6 +120,12 @@ class RetailerConfig(BaseModel):
     # registered-customer pricing). 0.10 = 10% off the listed price, applied
     # before profit is judged, so real edges are not missed.
     discount_pct: float = 0.0
+    # Extra checkout discount that applies ONLY to already-marked-down items
+    # (a running promo rather than standing pricing). Requires the scraper to
+    # report on_sale; if it doesn't, this is simply never applied. Set back to
+    # 0.0 when the promo ends — it is deliberately separate from discount_pct
+    # so a temporary offer never silently inflates full-price stock.
+    sale_discount_pct: float = 0.0
     buy_note: str = ""
     # A sibling storefront that is always preferable to buy from (same catalog
     # and price, but no reshipping). Alerts from this retailer will point at

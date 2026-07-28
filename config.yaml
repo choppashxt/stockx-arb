@@ -84,6 +84,12 @@ retailers:
     enabled: true
     scan_interval_minutes: 15
     request_delay_seconds: 2.5    # robots.txt asks Crawl-delay: 2; stay above it
+    # RUNNING PROMO (set 2026-07-28): extra 15% off at checkout, but only on
+    # items already marked down. Applied solely where the scraper reports
+    # on_sale, so full-price stock is never flattered. SET BACK TO 0.0 WHEN
+    # THE PROMO ENDS, or alerts will overstate profit on every sale item.
+    sale_discount_pct: 0.15
+    buy_note: "sale items take a further 15% at checkout"
     categories:
       - /en/men/sneakers
       - /en/women/sneakers
