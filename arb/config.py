@@ -116,6 +116,10 @@ class RetailerConfig(BaseModel):
     # purchase costs extra money and time. extra_cost_eur is added to the buy
     # price before profit is computed, and buy_note is shown on every alert.
     extra_cost_eur: float = 0.0
+    # Standing discount you personally get at this retailer (loyalty/club/
+    # registered-customer pricing). 0.10 = 10% off the listed price, applied
+    # before profit is judged, so real edges are not missed.
+    discount_pct: float = 0.0
     buy_note: str = ""
     # A sibling storefront that is always preferable to buy from (same catalog
     # and price, but no reshipping). Alerts from this retailer will point at

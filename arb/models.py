@@ -45,6 +45,14 @@ class Product(BaseModel):
     stock_note: Optional[str] = None    # freeform availability note for alerts
     buy_note: Optional[str] = None      # e.g. "via LT reshipper" — shown on alerts
     extra_cost_eur: float = 0.0         # reshipping/forwarding cost per unit
+    discount_pct: float = 0.0           # your standing discount at this shop
+
+    @property
+    def landed_cost(self) -> float:
+        """What this actually costs you delivered: listed price less any
+        standing discount you get at this shop, plus any forwarding cost.
+        Single source of truth — every profit calculation goes through here."""
+        return self.price * (1 - self.discount_pct) + self.extra_cost_eur
     scraped_at: datetime = Field(default_factory=utcnow)
 
 
@@ -128,7 +136,7 @@ class Opportunity(BaseModel):
     @property
     def landed_cost(self) -> float:
         """What the shoe actually costs you delivered, before StockX fees."""
-        return self.retail.price + self.retail.extra_cost_eur
+        return self.retail.landed_cost
 
     @property
     def best_profit(self) -> float:

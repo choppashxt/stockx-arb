@@ -52,8 +52,9 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
         log.info("%s: %d products scraped", retailer_name, len(products))
 
         rcfg = cfg.retailers[retailer_name]
-        for p in products:      # stamp landed-cost extras onto every record
+        for p in products:      # stamp landed-cost adjustments onto every record
             p.extra_cost_eur = rcfg.extra_cost_eur
+            p.discount_pct = rcfg.discount_pct
             p.buy_note = rcfg.buy_note or None
 
         # A retail discount is the single biggest reason something becomes
@@ -159,7 +160,7 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         used_call = True
 
     # remember how close this got, so the next re-check is scheduled sensibly
-    landed = product.price + product.extra_cost_eur
+    landed = product.landed_cost
     best = _best_upside(landed, fresh.values(), cfg)
     db.put_watch(sx_product.product_id,
                  None if best == float("-inf") else best)
@@ -330,7 +331,7 @@ def _build_opportunity(product: Product, size_label: str, us_size: str,
                        sx_product, variant, market: MarketData,
                        confidence: float, cfg: AppConfig) -> Optional[Opportunity]:
     # profit is judged on LANDED cost (price + any reshipping/forwarding)
-    landed = product.price + product.extra_cost_eur
+    landed = product.landed_cost
     sell_now, list_ask = scenarios(landed, market, cfg.profit, cfg.vat)
     if sell_now is None and list_ask is None:
         return None        # null market data: logged by provider, skip cleanly

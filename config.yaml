@@ -109,6 +109,10 @@ retailers:
     enabled: true
     scan_interval_minutes: 15
     request_delay_seconds: 2.5
+    # registered-client pricing: 10% off everything, applied before profit is
+    # judged so genuine edges here are not missed
+    discount_pct: 0.10
+    buy_note: "log in — registered client price is 10% below the listed one"
     categories:
       - /ee/category              # full grid; tiles carry style codes + prices
     max_pages: 80
