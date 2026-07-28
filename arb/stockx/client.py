@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 
 import httpx
 
-from ..config import StockXConfig
+from ..config import PROJECT_ROOT, StockXConfig
 from ..db import Database
 from .auth import TokenManager
 
@@ -20,6 +24,90 @@ MAX_RETRIES = 4
 # transient: 429 rate limit, 408 request timeout (StockX returns this when its
 # own upstream is slow) — both deserve a backoff-and-retry, not a hard failure
 _RETRYABLE_4XX = {408, 429}
+# Never sleep longer than this on a server-supplied Retry-After (a corrupt or
+# hostile header must not park the scanner for hours).
+RETRY_AFTER_CAP_S = 300.0
+
+
+def _retry_after_seconds(value: Optional[str]) -> Optional[float]:
+    """Parse a Retry-After header. RFC 9110 allows delay-seconds OR an
+    HTTP-date; return seconds from now, or None if absent/unparseable."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (dt - datetime.now(timezone.utc)).total_seconds()
+
+
+if os.name == "nt":
+    import msvcrt
+
+    def _lock_file(f) -> None:
+        # msvcrt LK_LOCK gives up after ~10 s; spin on the non-blocking form
+        while True:
+            try:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.05)
+
+    def _unlock_file(f) -> None:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _lock_file(f) -> None:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+    def _unlock_file(f) -> None:
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+class CrossProcessThrottle:
+    """StockX's 1 req/s limit is per API key, not per process — `arb report`
+    or `arb resolve` running beside the 24/7 scanner used to double the rate
+    (audit 1.1). All processes share a lease file: take an exclusive lock,
+    sleep out the remainder of the interval while HOLDING the lock (so other
+    processes queue behind us), stamp the wall clock, release."""
+
+    def __init__(self, path: str, interval_s: float):
+        self.path = path
+        self.interval_s = interval_s
+
+    def _wait_turn_blocking(self) -> None:
+        with open(self.path, "a+b") as f:
+            _lock_file(f)
+            try:
+                f.seek(0)
+                raw = f.read(64)
+                try:
+                    last = float(raw)
+                except ValueError:
+                    last = 0.0
+                wait = self.interval_s - (time.time() - last)
+                if wait > 0:
+                    time.sleep(wait)
+                f.seek(0)
+                f.truncate()
+                f.write(f"{time.time():.6f}".encode())
+                f.flush()
+            finally:
+                _unlock_file(f)
+
+    async def wait_turn(self) -> None:
+        # file locking + sleep happen in a worker thread so the event loop
+        # (7 other retailer coroutines) keeps running
+        await asyncio.to_thread(self._wait_turn_blocking)
 
 
 class BudgetExhausted(RuntimeError):
@@ -58,17 +146,15 @@ class StockXClient:
         self.cfg = cfg
         self._http = httpx.AsyncClient(base_url=BASE_URL, timeout=30)
         self._lock = asyncio.Lock()
-        self._last_request_at = 0.0
+        # machine-global pacing lease, shared with every other arb process
+        self._throttle_lease = CrossProcessThrottle(
+            str(PROJECT_ROOT / ".stockx_ratelimit"), cfg.min_request_interval_s)
 
     async def close(self) -> None:
         await self._http.aclose()
 
     async def _throttle(self) -> None:
-        loop = asyncio.get_running_loop()
-        wait = self.cfg.min_request_interval_s - (loop.time() - self._last_request_at)
-        if wait > 0:
-            await asyncio.sleep(wait)
-        self._last_request_at = loop.time()
+        await self._throttle_lease.wait_turn()
 
     async def get(self, path: str, params: Optional[dict] = None) -> Any:
         """GET with throttle/budget/retry. Returns parsed JSON.
@@ -95,7 +181,8 @@ class StockXClient:
                     return None
                 if resp.status_code == 401 and not refreshed:
                     log.info("401 from StockX — refreshing access token")
-                    token = await self.tokens.get_access_token(force_refresh=True)
+                    token = await self.tokens.get_access_token(
+                        force_refresh=True, stale_token=token)
                     refreshed = True
                     continue
                 if (400 <= resp.status_code < 500
@@ -107,9 +194,15 @@ class StockXClient:
                 if resp.status_code in _RETRYABLE_4XX or resp.status_code >= 500:
                     if attempt == MAX_RETRIES:
                         break
-                    retry_after = resp.headers.get("Retry-After")
-                    delay = float(retry_after) if retry_after and retry_after.isdigit() \
-                        else backoff * (1 + random.random() * 0.25)
+                    # server's Retry-After (seconds OR HTTP-date) is a FLOOR:
+                    # never retry sooner than asked, capped so a bad header
+                    # can't stall us forever (audit 1.3)
+                    server_floor = _retry_after_seconds(
+                        resp.headers.get("Retry-After"))
+                    delay = backoff * (1 + random.random() * 0.25)
+                    if server_floor is not None:
+                        delay = max(delay, server_floor)
+                    delay = min(delay, RETRY_AFTER_CAP_S)
                     log.warning("StockX %s on %s — backing off %.1fs",
                                 resp.status_code, path, delay)
                     await asyncio.sleep(delay)

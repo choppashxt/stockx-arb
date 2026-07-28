@@ -68,6 +68,26 @@ def collect_stats(cfg: AppConfig) -> dict[str, Any]:
 
     q = lambda sql, *a: conn.execute(sql, a).fetchone()[0]  # noqa: E731
 
+    def kv(key: str) -> Optional[str]:
+        r = conn.execute("SELECT v FROM kv WHERE k=?", (key,)).fetchone()
+        return r["v"] if r else None
+
+    # --- liveness: heartbeat beats log mtime --------------------------------
+    # The scanner writes kv "scanner_heartbeat" only when a scan runs to
+    # completion. Log-file activity is kept as a fallback display value, but
+    # "up" is judged by the heartbeat: a scanner failing every scan still
+    # writes log lines, so mtime alone always reads UP.
+    hb_age = _age(kv("scanner_heartbeat"))
+    out["scanner"]["seconds_since_heartbeat"] = (
+        round(hb_age) if hb_age is not None else None)
+    enabled_intervals = [rc.scan_interval_minutes
+                         for rc in cfg.retailers.values() if rc.enabled]
+    # stale threshold: 2x the fastest enabled interval, floor 30 min
+    # (a single scan can legitimately take 20+ min on slow retailers)
+    hb_stale_s = max(2 * 60 * min(enabled_intervals, default=15), 1800)
+    out["scanner"]["up"] = hb_age is not None and hb_age < hb_stale_s
+    out["scanner"]["heartbeat_stale_after_s"] = hb_stale_s
+
     # --- catalog coverage ---------------------------------------------------
     total_products = q("SELECT COUNT(*) FROM retail_products")
     in_stock = q("SELECT COUNT(*) FROM retail_products WHERE in_stock=1")
@@ -136,10 +156,6 @@ def collect_stats(cfg: AppConfig) -> dict[str, Any]:
     }
 
     # --- per-retailer status ------------------------------------------------
-    def kv(key: str) -> Optional[str]:
-        r = conn.execute("SELECT v FROM kv WHERE k=?", (key,)).fetchone()
-        return r["v"] if r else None
-
     retailers = []
     for name, rc in cfg.retailers.items():
         row = conn.execute(
@@ -163,6 +179,7 @@ def collect_stats(cfg: AppConfig) -> dict[str, Any]:
             "candidates": row["candidates"] if row else None,
             "opportunities": row["opportunities"] if row else None,
             "alerts_sent": row["alerts_sent"] if row else None,
+            "consecutive_failures": int(kv(f"consecutive_failures:{name}") or 0),
         })
     out["retailers"] = sorted(retailers, key=lambda r: (not r["enabled"], r["name"]))
 
@@ -284,7 +301,8 @@ async function tick(){
  st.className="pill "+(d.scanner.up?"up":"down");
  st.textContent=d.scanner.up?"● scanner running":"● scanner DOWN";
  document.getElementById("updated").textContent=
-   "last activity "+ago(d.scanner.seconds_since_activity);
+   "last completed scan "+ago(d.scanner.seconds_since_heartbeat)
+   +" · last log activity "+ago(d.scanner.seconds_since_activity);
  const c=d.coverage,m=d.market,a=d.api,al=d.alerts,s=d.settings;
  let h=`<div class="grid">
  ${card("Products checked vs StockX",fmt(c.checked_against_stockx),
@@ -313,7 +331,9 @@ async function tick(){
     :r.scanning?`<span class="acc">scanning ${ago(r.scanning_for_s)===("never")?"":"("+ago(r.scanning_for_s).replace(" ago","")+")"}</span>`
     :r.last_scan_age_s==null?`<span class="warn">no scan yet</span>`
     :r.overdue?`<span class="bad">overdue</span>`:`<span class="ok">idle</span>`;
-  h+=`<tr><td>${r.name}</td><td>${state}</td><td class="num muted">${ago(r.last_scan_age_s)}</td>
+  const fails=r.consecutive_failures>0
+    ?` <span class="bad">${r.consecutive_failures}× failed</span>`:"";
+  h+=`<tr><td>${r.name}</td><td>${state}${fails}</td><td class="num muted">${ago(r.last_scan_age_s)}</td>
   <td class="num">${fmt(r.products_seen)}</td><td class="num">${fmt(r.candidates)}</td>
   <td class="num">${fmt(r.opportunities)}</td><td class="num">${fmt(r.alerts_sent)}</td></tr>`}
  h+=`</table></div>`;

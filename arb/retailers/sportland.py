@@ -142,8 +142,12 @@ class SportlandScraper(RetailerScraper):
                              if (v.get("product") or {}).get("stock_status") == "IN_STOCK")
         parent_in_stock = item.get("stock_status") == "IN_STOCK" and in_stock_count > 0
 
-        enriched.sizes = [RetailSize(label=lbl, system="EU",
-                                     in_stock=parent_in_stock)
+        # Per-size stock is NOT knowable here (variants come back with
+        # attributes:null), so it is marked None=unknown rather than inheriting
+        # the parent flag. Stamping the parent's True on every label made every
+        # size look buyable, so alerts systematically named the extreme size
+        # with the best price — the one least likely to exist (audit 0.1).
+        enriched.sizes = [RetailSize(label=lbl, system="EU", in_stock=None)
                           for lbl in sorted(set(labels))]
         enriched.in_stock = parent_in_stock
         enriched.size_stock_unverified = True

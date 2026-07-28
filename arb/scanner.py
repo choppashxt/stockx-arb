@@ -102,6 +102,12 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
                 stats.opportunities += 1
                 await _maybe_alert(opp, scraper, cfg, db, notifier, stats)
 
+        # Liveness heartbeat: written only when a scan ran to completion.
+        # The dashboard judges "up" by this, not by log-file mtime — a
+        # scanner failing every scan still writes log lines, so log
+        # activity proves nothing about health.
+        db.kv_set("scanner_heartbeat", datetime.now(timezone.utc).isoformat())
+
     finally:
         await scraper.close()
         db.log_scan(retailer_name, started_at, stats.products_seen,
@@ -215,14 +221,14 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         from .models import RetailSize
         sizes = [RetailSize(label=v.conversions.get("eu") or (v.size or "?"),
                             system="EU" if "eu" in v.conversions else "US",
-                            us_size=v.size, in_stock=True)
+                            us_size=v.size, in_stock=None)
                  for v in variants if v.size]
 
     opportunities = []
     by_id = {v.variant_id: v for v in variants}
     for size in sizes:
-        if not size.in_stock:
-            continue
+        if size.in_stock is False:      # None = unknown -> still a candidate,
+            continue                    # the alert labels it unverified
 
         # Barcode first: a GTIN names exactly one product in exactly one size,
         # so there is nothing left to infer. It also cross-checks the style-code
@@ -309,8 +315,13 @@ def _market_ttl_minutes(db: Database, product_id: str, cfg: AppConfig) -> int:
     would spend most of it on shoes whose bid is a fraction of retail. Instead
     the gap to profitability sets the cadence."""
     watch = db.get_watch(product_id)
-    if watch is None or watch["best_profit"] is None:
+    if watch is None:
         return cfg.stockx.refresh_minutes_hot        # never assessed: look now
+    if watch["best_profit"] is None:
+        # Assessed, and no variant had a live bid at all. Under
+        # require_live_bid these can never alert, so treating NULL as "hot"
+        # spent half the daily budget refreshing bid-less shoes 32x/day.
+        return cfg.stockx.refresh_minutes_cold
     gap = cfg.filters.min_profit_eur - watch["best_profit"]
     if gap <= 0:
         return cfg.stockx.refresh_minutes_hot        # currently profitable
@@ -348,7 +359,8 @@ def _build_opportunity(product: Product, size_label: str, us_size: str,
     if sell_now is None and list_ask is None:
         return None        # null market data: logged by provider, skip cleanly
 
-    if _gate_profit(sell_now, list_ask, cfg) < cfg.filters.min_profit_eur:
+    gate = _gate_profit(sell_now, list_ask, cfg)
+    if gate < cfg.filters.min_profit_eur:
         return None
 
     if not _liquidity_ok(market, cfg):
@@ -361,8 +373,10 @@ def _build_opportunity(product: Product, size_label: str, us_size: str,
         est_days_to_clear=est_days_to_clear(market),
         match_confidence=confidence,
     )
+    # score on the SAME profit the gate judged — not best_profit, which under
+    # require_live_bid is usually the untakeable list-ask figure (audit 0.2)
     opp.score = opportunity_score(
-        opp.best_profit, sell_now is not None and sell_now.profit > 0, market)
+        gate, sell_now is not None and sell_now.profit > 0, market)
     return opp
 
 
@@ -429,7 +443,12 @@ async def _maybe_alert(opp: Opportunity, scraper: RetailerScraper, cfg: AppConfi
             return
         size_row = next((s for s in confirmed.sizes
                          if s.label == opp.size_label), None)
-        if not confirmed.in_stock or size_row is None or not size_row.in_stock:
+        # when per-size stock is unknowable (size_stock_unverified), a missing
+        # or None row is not evidence the size is gone — only judge sizes the
+        # retailer actually verifies
+        size_gone = (not confirmed.size_stock_unverified
+                     and (size_row is None or size_row.in_stock is False))
+        if not confirmed.in_stock or size_gone:
             log.info("size %s of %s gone on product page — not alerting",
                      opp.size_label, opp.retail.url)
             db.mark_out_of_stock(opp.key)
@@ -447,7 +466,14 @@ async def _maybe_alert(opp: Opportunity, scraper: RetailerScraper, cfg: AppConfi
             opp.retail = confirmed
         db.upsert_retail_product(confirmed)
 
-    await notifier.send(format_opportunity(opp, reason, cfg))
+    # Only a DELIVERED alert may be recorded: record_alert makes should_alert
+    # say "duplicate" from then on, so recording a failed send would suppress
+    # this opportunity forever. A failed send leaves no record and the alert
+    # simply fires again next cycle.
+    if not await notifier.send(format_opportunity(opp, reason, cfg)):
+        log.warning("alert delivery failed for %s — not recording; "
+                    "will retry next scan", opp.key)
+        return
     db.record_alert(opp.key, _gate_profit(opp.sell_now, opp.list_ask, cfg),
                     opp.retail.in_stock, opp.model_dump_json())
     stats.alerts_sent += 1
@@ -463,8 +489,12 @@ async def run_loop(cfg: AppConfig, db: Database, resolver: CatalogResolver,
         while True:
             try:
                 await run_scan(name, cfg, db, resolver, provider, notifier)
+                db.kv_set(f"consecutive_failures:{name}", "0")
             except Exception:
-                log.exception("scan of %s failed; continuing after interval", name)
+                fails = int(db.kv_get(f"consecutive_failures:{name}") or 0) + 1
+                db.kv_set(f"consecutive_failures:{name}", str(fails))
+                log.exception("scan of %s failed (%d in a row); continuing "
+                              "after interval", name, fails)
             await asyncio.sleep(interval)
 
     names = [n for n, rc in cfg.retailers.items()

@@ -7,4 +7,5 @@ __pycache__/
 *.pyc
 config.local.yaml
 paste-callback-url.txt
+.stockx_ratelimit
 *.log

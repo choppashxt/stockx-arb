@@ -67,14 +67,27 @@ def style_code_candidates_from_sku(sku: str) -> list[str]:
 
 def style_ids_match(retail_code: str, stockx_style_id: Optional[str]) -> bool:
     """Exact match against a StockX styleId, tolerant of separator noise.
-    StockX sometimes packs several forms into one field ('DD1391-100/DD1391 100')."""
+
+    StockX sometimes packs several *forms of the same code* into one field
+    ('DD1391-100/DD1391 100') — those are fine to match component-wise.
+    But multi-item sets ('FB7921-473/FB8002-473', hoodie + joggers) list one
+    code PER GARMENT: matching a single garment's code against one component
+    would price the part against the whole set's bid (audit 3.1). When the
+    components normalize to different codes, only the full combined code
+    (i.e. the retailer is also selling the set) may match."""
     if not stockx_style_id:
         return False
     want = normalize_style_code(retail_code)
     if not want:
         return False
-    parts = re.split(r"[/,]", stockx_style_id)
-    return any(normalize_style_code(p) == want for p in parts if p.strip())
+    parts = [normalize_style_code(p) for p in re.split(r"[/,]", stockx_style_id)
+             if p.strip()]
+    parts = [p for p in parts if p]
+    if not parts:
+        return False
+    if len(set(parts)) == 1:            # formatting variants of one code
+        return want == parts[0]
+    return want == normalize_style_code(stockx_style_id)
 
 
 def size_match_confidence(retail_us: Optional[str], retail_eu: Optional[str],
@@ -122,19 +135,21 @@ def _letter(size: str) -> Optional[str]:
 def _sizes_equal(a: str, b: str) -> bool:
     """Do these two size labels denote the same size?
 
-    Numeric sizes compare numerically ("EU 44" == "44"). Apparel sizes compare
-    as normalized letters ("Large" == "L", but L != M). Critically, two labels
-    that are merely both non-numeric are NOT equal: _num returns None for both
-    "L" and "M", and treating that as a match would sell an S into an XL bid.
+    The apparel-letter check runs FIRST: _num() grabs the leading digit of
+    "2XL", so a numeric-first order rated 2XL == 2XS == "2" at full confidence
+    (audit 10.1). If either label is a recognised apparel size, both must be,
+    and they must normalize to the same letter ("Large" == "L", but L != M —
+    treating any-letter-matches-any-letter as equal would sell an S into an
+    XL bid). Only then do numeric sizes compare numerically ("EU 44" == "44").
     Anything unrecognised returns False — never guess a size.
     """
+    la, lb = _letter(a), _letter(b)
+    if la is not None or lb is not None:
+        return la is not None and la == lb   # one apparel, one not: no match
     na, nb = _num(a), _num(b)
     if na is not None and nb is not None:
         return na == nb
-    if na is not None or nb is not None:
-        return False              # one numeric, one not: not comparable
-    la, lb = _letter(a), _letter(b)
-    return la is not None and la == lb
+    return False
 
 
 # adidas sizes come as "EU 44 2/3" / "42 1/3". Without this, the plain number

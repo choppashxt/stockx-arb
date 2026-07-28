@@ -86,13 +86,19 @@ def est_days_to_clear(market: MarketData) -> Optional[float]:
     return round(max(queue, 1) / per_day, 1)
 
 
-def opportunity_score(best_profit: float, sell_now_viable: bool,
+def opportunity_score(gated_profit: float, sell_now_viable: bool,
                       market: MarketData) -> float:
     """Rank: profit weighted by liquidity. A live bid you can sell straight into
-    doubles the score — the whole point is not losing the sale window."""
+    doubles the score — the whole point is not losing the sale window.
+
+    Callers must pass the GATED profit — the same figure the min-profit filter
+    judges (under require_live_bid, the sell-now/bid profit). Ranking on
+    best_profit let the untakeable list-ask number dominate (all early scores
+    were exactly 2 x list_ask.profit), so the size-unverified collapse picked
+    the size with the juiciest ask instead of the best live bid (audit 0.2)."""
     factor = 2.0 if sell_now_viable else 1.0
     if market.sales_72h:
         factor *= 1.0 + min(market.sales_72h, 10) / 10.0
     if market.highest_bid is None:
         factor *= 0.5      # no bid at all: weakest evidence of demand
-    return round(best_profit * factor, 2)
+    return round(gated_profit * factor, 2)

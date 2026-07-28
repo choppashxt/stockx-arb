@@ -20,7 +20,9 @@ class RetailSize(BaseModel):
                                     # (e.g. Ballzy encodes it in the variant SKU)
     ean: Optional[str] = None       # GTIN/EAN when the retailer exposes it —
                                     # enables exact StockX variant match by barcode
-    in_stock: bool = True
+    in_stock: Optional[bool] = True # True/False = retailer-verified; None =
+                                    # UNKNOWN (retailer hides per-size stock,
+                                    # e.g. Sportland). Never fabricate True.
 
 
 class Product(BaseModel):

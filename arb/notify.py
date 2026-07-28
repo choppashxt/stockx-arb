@@ -2,6 +2,7 @@
 console for --dry-run."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -61,9 +62,15 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
     if reason != "new":
         header += f"  [{reason}]"
 
-    size_line = f"{o.retail.style_code or '?'} · size EU {o.size_label} / US {o.us_size}"
     if o.retail.size_stock_unverified:
-        size_line += "  ⚠ best size shown"
+        # never assert a size we can't verify: the size named is only the best
+        # live-bid candidate among the labels the retailer lists — whether THAT
+        # size is in stock is unknown until the human checks (audit 0.1)
+        size_line = (f"{o.retail.style_code or '?'} · best-bid candidate: "
+                     f"EU {o.size_label} / US {o.us_size} — "
+                     "⚠ IN-STOCK STATUS UNKNOWN, verify size on page")
+    else:
+        size_line = f"{o.retail.style_code or '?'} · size EU {o.size_label} / US {o.us_size}"
     lines = [
         header,
         size_line,
@@ -101,16 +108,40 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
 
 class Notifier(ABC):
     @abstractmethod
-    async def send(self, text: str) -> None: ...
+    async def send(self, text: str) -> bool:
+        """Deliver the message. Returns True only if every chunk was
+        delivered — a False return means the caller must NOT mark the
+        alert as sent, so it survives to the next scan cycle."""
 
     async def close(self) -> None:
         pass
 
 
 class ConsoleNotifier(Notifier):
-    async def send(self, text: str) -> None:
+    async def send(self, text: str) -> bool:
         print("\n" + "─" * 72)
         print(text)
+        return True
+
+
+def _retry_after_seconds(resp: httpx.Response) -> float:
+    """429 backoff: prefer the JSON body's retry_after (Discord/Telegram both
+    supply one), then the Retry-After header, then a conservative default."""
+    try:
+        body = resp.json()
+        val = body.get("retry_after") or (
+            body.get("parameters") or {}).get("retry_after")
+        if val is not None:
+            return min(float(val), 60.0)
+    except Exception:
+        pass
+    header = resp.headers.get("retry-after")
+    if header:
+        try:
+            return min(float(header), 60.0)
+        except ValueError:
+            pass
+    return 5.0
 
 
 class DiscordNotifier(Notifier):
@@ -125,16 +156,34 @@ class DiscordNotifier(Notifier):
     async def close(self) -> None:
         await self._http.aclose()
 
-    async def send(self, text: str) -> None:
+    async def send(self, text: str) -> bool:
         for chunk in _chunk(text, DISCORD_MSG_LIMIT):
-            resp = await self._http.post(self.webhook_url, json={
-                "content": chunk,
-                # never ping @everyone/@here even if the text contains it
-                "allowed_mentions": {"parse": []},
-            })
-            if resp.status_code not in (200, 204):
-                log.error("Discord send failed: %s %s",
-                          resp.status_code, resp.text[:300])
+            if not await self._post_chunk(chunk):
+                return False
+        return True
+
+    async def _post_chunk(self, chunk: str, max_attempts: int = 3) -> bool:
+        for attempt in range(max_attempts):
+            try:
+                resp = await self._http.post(self.webhook_url, json={
+                    "content": chunk,
+                    # never ping @everyone/@here even if the text contains it
+                    "allowed_mentions": {"parse": []},
+                })
+            except httpx.HTTPError as e:
+                log.error("Discord send failed (network): %s", e)
+                return False
+            if resp.status_code in (200, 204):
+                return True
+            if resp.status_code == 429 and attempt < max_attempts - 1:
+                delay = _retry_after_seconds(resp)
+                log.warning("Discord rate limited; retrying in %.1fs", delay)
+                await asyncio.sleep(delay)
+                continue
+            log.error("Discord send failed: %s %s",
+                      resp.status_code, resp.text[:300])
+            return False
+        return False
 
 
 class TelegramNotifier(Notifier):
@@ -151,17 +200,35 @@ class TelegramNotifier(Notifier):
     async def close(self) -> None:
         await self._http.aclose()
 
-    async def send(self, text: str) -> None:
+    async def send(self, text: str) -> bool:
         # plain text with explicit escaping; disable previews to keep it skimmable
         for chunk in _chunk(text, TELEGRAM_MSG_LIMIT):
-            resp = await self._http.post("/sendMessage", json={
-                "chat_id": self.chat_id,
-                "text": chunk,
-                "disable_web_page_preview": True,
-            })
-            if resp.status_code != 200:
-                log.error("Telegram send failed: %s %s",
-                          resp.status_code, resp.text[:300])
+            if not await self._post_chunk(chunk):
+                return False
+        return True
+
+    async def _post_chunk(self, chunk: str, max_attempts: int = 3) -> bool:
+        for attempt in range(max_attempts):
+            try:
+                resp = await self._http.post("/sendMessage", json={
+                    "chat_id": self.chat_id,
+                    "text": chunk,
+                    "disable_web_page_preview": True,
+                })
+            except httpx.HTTPError as e:
+                log.error("Telegram send failed (network): %s", e)
+                return False
+            if resp.status_code == 200:
+                return True
+            if resp.status_code == 429 and attempt < max_attempts - 1:
+                delay = _retry_after_seconds(resp)
+                log.warning("Telegram rate limited; retrying in %.1fs", delay)
+                await asyncio.sleep(delay)
+                continue
+            log.error("Telegram send failed: %s %s",
+                      resp.status_code, resp.text[:300])
+            return False
+        return False
 
 
 def _chunk(text: str, limit: int) -> list[str]:

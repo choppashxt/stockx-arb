@@ -267,7 +267,10 @@ async def _cmd_report(args) -> int:
             size_ok = None
             if (sizes := _json.loads(cur["sizes_json"] or "[]")):
                 m = [s for s in sizes if s["label"] == o.size_label]
-                size_ok = bool(m and m[0].get("in_stock"))
+                if m and m[0].get("in_stock") is None:
+                    size_ok = None      # per-size stock unverified (Sportland)
+                else:
+                    size_ok = bool(m and m[0].get("in_stock"))
             try:
                 md = (await provider.get_market_data(o.stockx.product_id)).get(
                     o.variant.variant_id)
@@ -277,8 +280,11 @@ async def _cmd_report(args) -> int:
             if md is None or not md.highest_bid:
                 gone.append((o, "no live bid"))
                 continue
-            sn, _ = scenarios(cur["price"] + o.retail.extra_cost_eur, md,
-                              cfg.profit, cfg.vat)
+            # Same cost basis as the scanner: rebuild the stored Product with
+            # the current price so discounts/extra costs flow through
+            # landed_cost (audit 10.2 — report used price+extra only).
+            basis = o.retail.model_copy(update={"price": cur["price"]}).landed_cost
+            sn, _ = scenarios(basis, md, cfg.profit, cfg.vat)
             profit = sn.profit if sn else float("-inf")
             if profit < cfg.filters.min_profit_eur:
                 gone.append((o, f"bid €{md.highest_bid:.0f} -> €{profit:+.2f}"))
