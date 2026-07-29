@@ -11,7 +11,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
+
+# The AV product on this machine injects SSLKEYLOGFILE=\\.\aswMonFltProxy\<handle>
+# into every process it launches. ssl.create_default_context() honours that
+# variable, cannot open the device, and every httpx client construction dies
+# with PermissionError before a single request is made. We never want to dump
+# TLS session keys anyway, so drop it before any SSL context exists.
+os.environ.pop("SSLKEYLOGFILE", None)
 
 try:
     import truststore
