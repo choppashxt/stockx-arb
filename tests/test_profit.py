@@ -18,6 +18,7 @@ from arb.profit import (
 )
 
 PROFIT = ProfitConfig(transaction_fee_pct=0.10, processing_fee_pct=0.03,
+                      min_transaction_fee_eur=0.0,
                       shipping_to_stockx_eur=7.0, undercut_eur=0.0)
 NO_VAT = VatConfig(enabled=False)
 
@@ -40,6 +41,24 @@ class TestBreakdown:
         assert b.margin_pct == pytest.approx(0.67)
         # capital tied up = retail + shipping = 107
         assert b.roic == pytest.approx(67.0 / 107.0)
+
+    def test_minimum_transaction_fee_floors_cheap_sales(self):
+        """StockX charges a minimum seller fee (EUR 5.00 in the EU). Without
+        this floor a cheap flip looks more profitable than it is."""
+        cfg = ProfitConfig(transaction_fee_pct=0.09, processing_fee_pct=0.03,
+                           min_transaction_fee_eur=5.0,
+                           shipping_to_stockx_eur=7.0, undercut_eur=0.0)
+        # 40 * 0.09 = 3.60, below the floor -> charged 5.00
+        cheap = breakdown("sell_now", 40.0, 20.0, cfg, NO_VAT)
+        assert cheap.transaction_fee == pytest.approx(5.0)
+        assert cheap.payout == pytest.approx(40.0 - 5.0 - 1.2 - 7.0)
+
+        # break-even point: 5.00 / 0.09 = 55.56
+        assert breakdown("sell_now", 55.0, 20.0, cfg, NO_VAT
+                         ).transaction_fee == pytest.approx(5.0)
+        # above it the percentage governs again
+        assert breakdown("sell_now", 200.0, 20.0, cfg, NO_VAT
+                         ).transaction_fee == pytest.approx(18.0)
 
     def test_vat_disabled_is_strict_noop(self):
         assert vat_wedge(200.0, 100.0, NO_VAT) == 0.0

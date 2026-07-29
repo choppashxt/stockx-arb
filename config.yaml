@@ -4,8 +4,17 @@
 db_path: state.db
 
 profit:
-  transaction_fee_pct: 0.095      # StockX seller Level 1
+  # Verified 2026-07-29 against stockx.com/help. Level 1 = 9.0% (was set to
+  # 9.5% here, which understated profit). Fees are IDENTICAL across categories
+  # — sneakers, streetwear, collectibles, cards, electronics all pay this.
+  transaction_fee_pct: 0.09       # StockX seller Level 1 (L2 8.5 / L3 8 / L4 7.5 / L5 7)
   processing_fee_pct: 0.03
+  # StockX enforces a minimum seller fee: EUR 5.00 in the EU. Below a ~EUR 56
+  # sale price the percentage fee is smaller than this, so cheap flips were
+  # being modelled too favourably. Applied to the transaction fee (the stricter
+  # of the two readings — StockX's help page does not say whether the minimum
+  # covers processing too).
+  min_transaction_fee_eur: 5.00
   shipping_to_stockx_eur: 7.00    # flat label cost per unit, Estonia -> Eindhoven
   undercut_eur: 0.00              # list_ask scenario: undercut lowest ask by this much
 

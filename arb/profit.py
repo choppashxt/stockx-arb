@@ -29,7 +29,10 @@ def vat_wedge(sale_price: float, retail_price: float, vat: VatConfig) -> float:
 
 def breakdown(scenario: str, sale_price: float, retail_price: float,
               profit_cfg: ProfitConfig, vat_cfg: VatConfig) -> ProfitBreakdown:
-    tx = sale_price * profit_cfg.transaction_fee_pct
+    # StockX enforces a minimum seller fee (EUR 5.00 in the EU), which bites on
+    # anything selling below roughly EUR 56 at the Level 1 rate.
+    tx = max(sale_price * profit_cfg.transaction_fee_pct,
+             profit_cfg.min_transaction_fee_eur)
     proc = sale_price * profit_cfg.processing_fee_pct
     ship = profit_cfg.shipping_to_stockx_eur
     vat = vat_wedge(sale_price, retail_price, vat_cfg)

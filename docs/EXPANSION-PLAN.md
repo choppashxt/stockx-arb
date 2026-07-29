@@ -174,10 +174,10 @@ In dependency order, not in parallel:
    lego_set / mpn) — added *with* their consumers, not as write-only fields.
    The codebase already carries dead fields of exactly this kind
    (`product_type`, `pickup_available`); do not add more.
-4. **Per-category profit settings — deferred out of Phase A.** This plan's own
-   open-questions section admits the StockX collectibles fee tier is unknown.
-   Specifying fees against an unknown number is how you get confident wrong
-   profit maths. Confirm the tier first.
+4. **Per-category profit settings — dropped from the plan entirely.** Resolved
+   2026-07-29: StockX fees do **not** vary by category (see *Fees*). One fee
+   model covers sneakers, streetwear, collectibles, cards and electronics. This
+   was a whole workstream that turned out not to exist.
 
 No new retailers in this phase.
 
@@ -210,33 +210,81 @@ accept that Phase C is permanently no-alert.**
 
 ### Phase E — electronics, only if D proves out
 
-Highest capital, weakest liquidity outside hype items, and the plug/region trap.
-Would use klick.ee and euronics.ee via EAN matching — which requires the
-barcode-first path built first (see *Matching keys*). Must refuse to alert
-whenever the StockX title carries a region marker the retail listing cannot
-confirm.
+Weakest liquidity outside hype items, plus the plug/region trap. Would use
+klick.ee and euronics.ee via EAN matching — which requires the barcode-first
+path built first (see *Matching keys*). Must refuse to alert whenever the
+StockX title carries a region marker the retail listing cannot confirm.
 
-### Streetwear — decide, don't ignore
+Capital per unit is **no longer a gate** (decided 2026-07-29: any unit price is
+acceptable if the flip is profitable). The remaining objections are unchanged
+and are about *probability*, not size: electronics depreciate while listed, and
+a region mismatch is invisible in the product title.
 
-The first draft listed streetwear as "not planned" on the grounds that Supreme
-has no Estonian retail presence. Meanwhile **876 streetwear products are already
-resolved and cached**, because nothing filters on `product_type` — it is set at
-`catalog.py:53` and never read. Two honest options: filter it out at
-`_cheap_screen` to reclaim the API budget, or drop the "not planned" line and
-treat it as in scope. Doing neither means paying for it and pretending we don't.
+### Streetwear — in scope
+
+Decided 2026-07-29: **streetwear is in.** The first draft listed it as "not
+planned" because Supreme has no Estonian retail presence, while 876 streetwear
+products were already resolved and cached anyway — nothing filters on
+`product_type` (set at `catalog.py:53`, never read).
+
+That accidental state is now the intended one, so no filter is added and no
+budget is reclaimed. Two consequences worth tracking:
+
+- Apparel carries letter sizes (S/M/L/XL/2XL), which have their own matching
+  hazards — the `2XL` vs `2XS` collision fixed on 2026-07-28 was found in
+  exactly this path. Apparel matching deserves stricter scrutiny than sneakers,
+  not less.
+- Multi-garment sets ("Hoodie & Joggers Set") share a `styleId` with their
+  components and were mispricing single garments against set-level bids. Guarded
+  2026-07-28; keep the guard in mind when adding apparel retailers.
 
 **Still not planned:** handbags — authentication risk, no Estonian retail source
 at a discount.
 
+## Fees — resolved 2026-07-29
+
+Looked up against `stockx.com/help` (Verified Marketplace, seller account is
+**Level 1**):
+
+| Level | Transaction fee | Quarterly requirement |
+|---|---|---|
+| **1** | **9.0%** | none |
+| 2 | 8.5% | 12 sales or $1,500 |
+| 3 | 8.0% | 40 sales or $5,000 |
+| 4 | 7.5% | 200 sales or $25,000 |
+| 5 | 7.0% | 800 sales or $100,000 |
+
+Plus **3% payment processing** at every level, and a **minimum seller fee of
+€5.00** in the EU.
+
+**Fees do not vary by category.** Sneakers, streetwear, collectibles, trading
+cards and electronics all pay the same. This kills the per-category fee
+workstream in Phase A outright.
+
+Two corrections to the scanner followed from this lookup:
+
+1. `transaction_fee_pct` was **9.5%**, not 9.0% — the model was overcharging
+   itself 0.5% of every sale price and hiding marginal opportunities.
+2. The **€5.00 minimum was not modelled at all.** Below a ~€55.56 sale price the
+   percentage fee is smaller than the floor, so cheap flips were scored too
+   favourably — the direction that invents opportunities rather than hiding
+   them. Now applied to the transaction fee.
+
+Net effect: above a €52.63 sale price profit estimates rise slightly (+€1.00 on
+a €200 bid); below it they fall (−€1.20 on a €40 bid).
+
+Levels are assessed quarterly and the benefit persists for the current and
+following quarter, so `transaction_fee_pct` needs revisiting if volume ever
+reaches 12 sales / $1,500 in a quarter.
+
 ## Open questions for the human
 
-- Are you willing to hold higher-value single units (a €400 Lego set, a €600
-  console) versus €70 sneakers? That decides whether Phase E is worth attempting.
-- StockX seller fee tier for collectibles — confirm whether it differs from the
-  9.5% + 3% used for sneakers. Phase A's per-category fee work is blocked on this.
 - Do you want cards at all, given they need sealed storage, have the fuzziest
   matching, and require `arb review` to exist first?
-- Streetwear: filter it out, or bring it in scope?
+
+*Answered 2026-07-29:* unit price is not a constraint provided the flip is
+profitable (Phase E capital gate removed); streetwear is in scope; StockX fee
+tier confirmed uniform across categories at Level 1 = 9% + 3%.
 
 ## Corrections applied 2026-07-29
 
@@ -249,6 +297,8 @@ Against `docs/AUDIT-2026-07-28.md` §8, re-verified by hand before rewriting:
 | Phase A acceptance = "re-run sneakers unchanged" | **Insufficient.** Selftest asserts a sneaker fixture and would pass with sizeless still broken; needs a failing sizeless fixture |
 | Phase B "set numbers are unambiguous keys" | **Unverified** for StockX `styleId`. Promoted to a one-call probe, Phase 0-E |
 | Phase C "route ambiguous to review queue" | **Dead end.** 931 unread rows, no `arb review`. Now a hard prerequisite |
-| Phase A per-category fees | **Deferred** — specified against this document's own unanswered question |
+| Phase A per-category fees | **Dropped.** Fee lookup 2026-07-29 shows fees are uniform across categories — the workstream did not exist |
 | Watches (88%, best measured) | **Added as a phase**; previously endorsed in prose but sequenced nowhere |
-| "Not planned: streetwear" | **876 already cached and unfiltered.** Now an explicit decision, not an omission |
+| "Not planned: streetwear" | **876 already cached and unfiltered.** Now in scope by decision |
+| Level 1 fee assumed 9.5% | **9.0%.** Config corrected; the scanner was understating every profit by 0.5% of sale price |
+| EU €5.00 minimum seller fee | **Was not modelled.** Cheap flips (sale < €55.56) were scored too favourably; now floored |

@@ -149,8 +149,15 @@ async def _cmd_selftest(args) -> int:
         opp = all_opps[0]
         if opp.size_label != "42":
             failures.append(f"wrong size alerted: {opp.size_label}")
-        # sell_now: 145 - 13.775 - 4.35 - 7 = 119.875 -> profit 40.875
-        expected_profit = 145 - 145 * 0.095 - 145 * 0.03 - 7 - 79
+        # Derived from the live config, not hardcoded: fee literals here went
+        # stale the moment the Level 1 rate was corrected 9.5% -> 9% (audit 10.3).
+        p = cfg.profit
+        expected_profit = (145
+                           - max(145 * p.transaction_fee_pct,
+                                 p.min_transaction_fee_eur)
+                           - 145 * p.processing_fee_pct
+                           - p.shipping_to_stockx_eur
+                           - 79)
         if abs(opp.sell_now.profit - expected_profit) > 0.01:
             failures.append(f"sell_now profit {opp.sell_now.profit:.2f} != "
                             f"{expected_profit:.2f}")

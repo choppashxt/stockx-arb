@@ -39,8 +39,9 @@ class Secrets(BaseSettings):
 
 
 class ProfitConfig(BaseModel):
-    transaction_fee_pct: float = 0.095
+    transaction_fee_pct: float = 0.09
     processing_fee_pct: float = 0.03
+    min_transaction_fee_eur: float = 5.00
     shipping_to_stockx_eur: float = 7.00
     undercut_eur: float = 0.00
 
