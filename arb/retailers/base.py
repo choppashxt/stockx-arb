@@ -181,6 +181,10 @@ class RetailerScraper(ABC):
         across scans without hammering it in one go."""
         if not slugs or per_scan <= 0:
             return []
+        # Never ask for more than exists: with per_scan=100 over an 8-item list
+        # the wrap-around below returned all 8 twice, doubling page fetches for
+        # every small catalog.
+        per_scan = min(per_scan, len(slugs))
         offset = 0
         key = f"rotation:{self.name}"
         if self.db is not None and (raw := self.db.kv_get(key)):

@@ -42,6 +42,22 @@ def _fuzzy_best(brand: str, name: str, hits: list[dict]) -> Optional[dict]:
     return None
 
 
+def _brands_agree(retail_brand: Optional[str],
+                  stockx_brand: Optional[str]) -> bool:
+    """Do the two brand strings name the same maker?
+
+    Compared on the first token, case-insensitively, so 'LEGO' agrees with
+    'LEGO Star Wars' but not with 'Pokemon'. Returns False when either side is
+    missing: this gates the title-code path, where the absence of corroboration
+    is a reason to decline, not to proceed.
+    """
+    if not retail_brand or not stockx_brand:
+        return False
+    a = retail_brand.strip().lower().split()
+    b = stockx_brand.strip().lower().split()
+    return bool(a) and bool(b) and a[0] == b[0]
+
+
 def _product_from_search_hit(hit: dict) -> StockXProduct:
     attrs = hit.get("productAttributes") or {}
     return StockXProduct(
@@ -132,8 +148,17 @@ class CatalogResolver:
             # Only consulted when the hit has NO styleId at all: a product that
             # HAS a code which failed to match is evidence AGAINST the match,
             # and the title must not be used to talk us past it.
+            # A title code is also weaker evidence than a styleId, so it must be
+            # corroborated by the BRAND. Without that check, a LEGO advent
+            # calendar whose name contained '2025' matched the StockX title
+            # '2025 Pokemon Mega Evolution Charizard X ex Ultra-Premium
+            # Collection' and got priced against a card-box bid (caught on the
+            # first live Apollo run, 2026-07-29). No retail brand means no
+            # corroboration available, so no title match.
             for hit in hits:
                 if (hit.get("styleId") or "").strip():
+                    continue
+                if not _brands_agree(brand, hit.get("brand")):
                     continue
                 if code_in_title(code, hit.get("title")):
                     product = _product_from_search_hit(hit)

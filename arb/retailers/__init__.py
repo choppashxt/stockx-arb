@@ -3,6 +3,7 @@ register it here and give it a block in config.yaml under `retailers:`."""
 from __future__ import annotations
 
 from ..config import RetailerConfig
+from .apollo import ApolloScraper
 from .base import RetailerScraper
 from .ballzy import BallzyScraper
 from .rademar import RademarScraper
@@ -32,6 +33,8 @@ _SCRAPERS: dict[str, type[RetailerScraper]] = {
     "footshop": FootshopScraper,        # microdata; size stock unverified
     # stadium.fi: homepage answers but the INTERSHOP catalog paths 403 plain
     # clients (verified 2026-07-27) — skipped per the no-anti-detection rule.
+    # Non-sneaker categories (sizeless: one StockX variant, no size)
+    "apollo": ApolloScraper,            # Lego sets; ld+json with sku + gtin
 }
 
 

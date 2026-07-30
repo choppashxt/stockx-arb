@@ -36,6 +36,11 @@ class Product(BaseModel):
     # "electronics". Set by the scraper, shown on sizeless alerts so the human
     # knows what condition StockX will authenticate against (sealed box vs shoe).
     category: Optional[str] = None
+    # Product-level barcode, for SIZELESS items where there is no RetailSize row
+    # to carry one. Used to cross-check the code match: a GTIN that names a
+    # different StockX product means the match is wrong, and a wrong barcode
+    # resolves to a plausible OTHER real product rather than to nothing.
+    ean: Optional[str] = None
     colorway: Optional[str] = None
     url: str
     price: float                        # current buy-now price

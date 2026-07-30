@@ -226,6 +226,24 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         market = fresh.get(variant.variant_id)
         if market is None:
             return [], used_call
+        # Barcode cross-check. The code came from the TITLE for these products,
+        # which is weaker evidence than a styleId, so where the retailer
+        # publishes an EAN we make it agree. A wrong barcode does not resolve to
+        # nothing — probed 2026-07-29, a mistyped Lego EAN resolved cleanly to a
+        # different real set — so disagreement has to block.
+        if product.ean:
+            gv = await resolver.resolve_gtin(product.ean)
+            if gv is not None and gv.product_id != sx_product.product_id:
+                log.warning("GTIN %s says %s but code %s resolved to %s — "
+                            "not alerting", product.ean, gv.product_id[:8],
+                            product.style_code, sx_product.product_id[:8])
+                db.add_review(product.retailer, product.url, product.style_code,
+                              "gtin_product_mismatch",
+                              {"ean": product.ean,
+                               "gtin_product": gv.product_id,
+                               "code_product": sx_product.product_id})
+                return [], used_call
+
         blocker = region_mismatch(sx_product.title, product.name)
         if blocker:
             # e.g. StockX sells the "(US Plug)" variant; a EU-plug unit bought

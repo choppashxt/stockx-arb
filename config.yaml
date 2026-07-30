@@ -203,6 +203,23 @@ retailers:
     slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, yeezy, dunk, samba]
 
+  apollo:
+    # First non-sneaker retailer: Lego sets (sealed collectibles). Estonian, so
+    # no reshipping to model. Catalog comes from the sitemaps only — robots.txt
+    # disallows /catalogsearch, and the scraper enforces that in code because
+    # urllib's robotparser would let it through (their `Allow: /` comes first).
+    #
+    # The catalog is ~200k URLs and mostly books, so slug_filters does the first
+    # cut and the scraper then requires a 4-6 digit set number in the product
+    # name — which is exactly what separates Lego SETS from Lego picture-books.
+    enabled: true
+    scan_interval_minutes: 180
+    request_delay_seconds: 2.5      # robots states no Crawl-delay; be polite anyway
+    sitemap_slice_per_scan: 100
+    sitemap_refresh_hours: 24
+    max_pages: 20                   # 20 child sitemaps in the index
+    slug_filters: [lego]
+
   overkill:
     # Berlin boutique; hype-heavy stock. Ships to Estonia: DHL EUR13, 2-5 days
     # (verified on their shipping page 2026-07-27) â€” charged as landed cost.
