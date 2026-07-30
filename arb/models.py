@@ -32,6 +32,10 @@ class Product(BaseModel):
     name: str
     brand: Optional[str] = None
     style_code: Optional[str] = None    # normalized manufacturer code, e.g. HQ2010-005
+    # What kind of thing this is: "sneakers", "apparel", "collectibles",
+    # "electronics". Set by the scraper, shown on sizeless alerts so the human
+    # knows what condition StockX will authenticate against (sealed box vs shoe).
+    category: Optional[str] = None
     colorway: Optional[str] = None
     url: str
     price: float                        # current buy-now price
@@ -123,8 +127,11 @@ class ProfitBreakdown(BaseModel):
 
 class Opportunity(BaseModel):
     retail: Product
-    size_label: str                     # retailer size label this signal is for
-    us_size: str
+    # Both None for a SIZELESS product — Lego, cards, electronics and watches
+    # return exactly one StockX variant with no size value at all. There is no
+    # size to match, so claiming one would be inventing information.
+    size_label: Optional[str] = None     # retailer size label this signal is for
+    us_size: Optional[str] = None
     stockx: StockXProduct
     variant: StockXVariant
     market: MarketData
@@ -140,10 +147,17 @@ class Opportunity(BaseModel):
 
     @property
     def key(self) -> str:
-        """Dedup identity: same shoe, same size, same shop."""
+        """Dedup identity: same item, same size, same shop. A sizeless product
+        keys on the variant alone — it has exactly one, so that is already
+        unique, and interpolating None would make the key read "...|None"."""
         if self.key_override:
             return self.key_override
-        return f"{self.retail.retailer}|{self.variant.variant_id}|{self.size_label}"
+        base = f"{self.retail.retailer}|{self.variant.variant_id}"
+        return f"{base}|{self.size_label}" if self.size_label else base
+
+    @property
+    def sizeless(self) -> bool:
+        return self.size_label is None
 
     @property
     def landed_cost(self) -> float:

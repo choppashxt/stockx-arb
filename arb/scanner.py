@@ -13,7 +13,11 @@ from typing import Optional
 
 from .config import AppConfig
 from .db import Database
-from .matching import size_match_confidence, style_code_candidates_from_sku
+from .matching import (
+    region_mismatch,
+    size_match_confidence,
+    style_code_candidates_from_sku,
+)
 from .models import MarketData, Opportunity, Product
 from .notify import Notifier, format_opportunity
 from .profit import est_days_to_clear, opportunity_score, scenarios
@@ -213,6 +217,34 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
         if not _any_upside(product.landed_cost, fresh.values(), cfg):
             return [], used_call
 
+    # SIZELESS products (Lego, trading cards, electronics, watches): StockX
+    # returns exactly one variant carrying no size value. There is no size to
+    # match, so the size loop below would iterate zero times and the product
+    # could never alert. Emit one product-level opportunity instead.
+    if _is_sizeless(variants):
+        variant = variants[0]
+        market = fresh.get(variant.variant_id)
+        if market is None:
+            return [], used_call
+        blocker = region_mismatch(sx_product.title, product.name)
+        if blocker:
+            # e.g. StockX sells the "(US Plug)" variant; a EU-plug unit bought
+            # here is a DIFFERENT product and would fail authentication. The
+            # titles look near-identical, so this must be refused, not guessed.
+            log.info("region marker %r unconfirmed for %s — not alerting",
+                     blocker, product.url)
+            db.add_review(product.retailer, product.url, product.style_code,
+                          "region_marker_unconfirmed",
+                          {"stockx_title": sx_product.title,
+                           "retail_name": product.name, "marker": blocker})
+            return [], used_call
+        opp = _build_opportunity(product, None, None, sx_product, variant,
+                                 market, confidence, cfg)
+        if opp is None:
+            return [], used_call
+        opp.size_match_method = "sizeless (single variant)"
+        return [opp], used_call
+
     sizes = product.sizes
     if product.size_stock_unverified and not sizes:
         # retailer exposes no size data at all (e.g. Footshop): consider every
@@ -330,6 +362,14 @@ def _market_ttl_minutes(db: Database, product_id: str, cfg: AppConfig) -> int:
     return cfg.stockx.refresh_minutes_cold           # far away; check daily
 
 
+def _is_sizeless(variants) -> bool:
+    """True when StockX carries this product in exactly one variant that has no
+    size value. Deliberately strict: a single-variant SNEAKER (a one-size-left
+    listing would not look like this, but a data glitch could) still has a size
+    string, so it keeps going down the size-matching path."""
+    return len(variants) == 1 and not (variants[0].size or "").strip()
+
+
 def _match_variant(us_size: Optional[str], eu_label: Optional[str], variants):
     """Best (variant, confidence) for a retail size row. Never guesses:
     an EU-only match that fits MORE than one variant of the product is
@@ -350,7 +390,8 @@ def _match_variant(us_size: Optional[str], eu_label: Optional[str], variants):
     return best, best_conf
 
 
-def _build_opportunity(product: Product, size_label: str, us_size: str,
+def _build_opportunity(product: Product, size_label: Optional[str],
+                       us_size: Optional[str],
                        sx_product, variant, market: MarketData,
                        confidence: float, cfg: AppConfig) -> Optional[Opportunity]:
     # profit is judged on LANDED cost (price + any reshipping/forwarding)
@@ -409,7 +450,9 @@ def _attach_preferred_source(opp: Opportunity, cfg: AppConfig, db: Database) -> 
     except json.JSONDecodeError:
         sizes = []
     in_stock = [s["label"] for s in sizes if s.get("in_stock")]
-    if in_stock:
+    if opp.sizeless:
+        has = "in stock"          # no sizes to compare on either side
+    elif in_stock:
         has = ("HAS EU " + opp.size_label if opp.size_label in in_stock
                else f"sizes: {', '.join(in_stock[:8])}")
     else:
@@ -443,10 +486,12 @@ async def _maybe_alert(opp: Opportunity, scraper: RetailerScraper, cfg: AppConfi
             return
         size_row = next((s for s in confirmed.sizes
                          if s.label == opp.size_label), None)
-        # when per-size stock is unknowable (size_stock_unverified), a missing
-        # or None row is not evidence the size is gone — only judge sizes the
-        # retailer actually verifies
-        size_gone = (not confirmed.size_stock_unverified
+        # A sizeless product has no size rows to consult, so their absence says
+        # nothing — product-level stock is the whole answer. Otherwise: when
+        # per-size stock is unknowable (size_stock_unverified), a missing or
+        # None row is not evidence the size is gone either.
+        size_gone = (not opp.sizeless
+                     and not confirmed.size_stock_unverified
                      and (size_row is None or size_row.in_stock is False))
         if not confirmed.in_stock or size_gone:
             log.info("size %s of %s gone on product page — not alerting",

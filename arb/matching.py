@@ -90,6 +90,71 @@ def style_ids_match(retail_code: str, stockx_style_id: Optional[str]) -> bool:
     return want == normalize_style_code(stockx_style_id)
 
 
+def code_in_title(retail_code: str, stockx_title: Optional[str]) -> bool:
+    """Does the retailer's product code appear as a whole token in the StockX
+    title?
+
+    Non-sneaker products carry an EMPTY `styleId` (verified 2026-07-29 across
+    collectibles and watches), so `style_ids_match` can never fire for them.
+    The identifying code is in the title instead:
+
+        'LEGO Star Wars Millennium Falcon Ultimate Collector Series Set 75192'
+        'Casio G-Shock x Pokemon 30th Anniversary GA-110PKM-7A'
+
+    Search ranking alone is NOT evidence — querying '75192' also returned a
+    Gucci jogger (styleId '715192 XJETI 2270'). So the code must be confirmed
+    against the title, and only on a token boundary: a bare substring test
+    would let '5192' match '715192' and '21044' match '210440'.
+    """
+    if not stockx_title:
+        return False
+    want = normalize_style_code(retail_code)
+    if len(want) < 4:
+        # 3-digit codes collide with years, counts and set-piece numbers far
+        # too easily to be treated as identifying on their own.
+        return False
+    for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-]*", stockx_title):
+        if normalize_style_code(token) == want:
+            return True
+    return False
+
+
+# StockX sells region-specific electronics as SEPARATE products whose titles are
+# otherwise identical: '... Bundle (US Plug)' vs '... BundIe (EU Plug)'. Buying
+# the EU unit against a bid on the US one is the same class of error as a wrong
+# shoe size, but invisible in the name.
+_REGION_MARKER = re.compile(
+    r"\((?:\d{3}-\d{3}V\s*)?(US|EU|UK|AU|JP|KR|CN)\s*(?:Plug|Version|Spec)\)", re.I)
+
+
+def region_marker(title: Optional[str]) -> Optional[str]:
+    """The region marker in a StockX title, e.g. 'US Plug', or None."""
+    if not title:
+        return None
+    m = _REGION_MARKER.search(title)
+    return m.group(0).strip("()") if m else None
+
+
+def region_mismatch(stockx_title: Optional[str],
+                    retail_name: Optional[str]) -> Optional[str]:
+    """The marker to refuse on, or None when it is safe to proceed.
+
+    Returns the marker whenever StockX pins a region that the retail listing
+    does not state. Silence from the retailer is not agreement — an Estonian
+    shop selling a EU-plug console rarely says so, which is exactly why this
+    has to block rather than assume."""
+    marker = region_marker(stockx_title)
+    if marker is None:
+        return None
+    region = re.match(r"(?:\d{3}-\d{3}V\s*)?([A-Z]{2})", marker, re.I)
+    if region and retail_name:
+        want = region.group(1).upper()
+        if re.search(rf"\(\s*{want}\b", retail_name, re.I) or \
+                re.search(rf"\b{want}\s*(?:Plug|Version|Spec)\b", retail_name, re.I):
+            return None      # retailer states the same region — safe
+    return marker
+
+
 def size_match_confidence(retail_us: Optional[str], retail_eu: Optional[str],
                           variant_us: Optional[str],
                           variant_eu: Optional[str]) -> float:

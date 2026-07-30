@@ -150,11 +150,27 @@ async def _cmd_selftest(args) -> int:
         all_opps.extend(opps)
 
     # expectations: AJ1 size 42 profitable; size 44 null-market (skipped);
-    # size 45 out of stock (skipped); Campus below min profit
-    if len(all_opps) != 1:
-        failures.append(f"expected exactly 1 opportunity, got {len(all_opps)}")
-    else:
-        opp = all_opps[0]
+    # size 45 out of stock (skipped); Campus below min profit; sizeless Lego
+    # profitable at product level; sizeless PS5 refused on its region marker
+    # despite clearing the floor by a mile.
+    #
+    # The old assertion here was "exactly 1 opportunity, size 42" — it could
+    # not observe a sizeless product at all, which is why the expansion plan's
+    # "re-run the sneakers unchanged" acceptance test proved nothing.
+    sized = [o for o in all_opps if not o.sizeless]
+    sizeless = [o for o in all_opps if o.sizeless]
+    if len(sized) != 1:
+        failures.append(f"expected exactly 1 sized opportunity, got {len(sized)}")
+    if len(sizeless) != 1:
+        failures.append(f"expected exactly 1 sizeless opportunity, got "
+                        f"{len(sizeless)}")
+    elif sizeless[0].retail.style_code != "75192":
+        failures.append(f"wrong sizeless item: {sizeless[0].retail.style_code}")
+    if any(o.retail.style_code == "PS5PRO30TH" for o in all_opps):
+        failures.append("region-marked product alerted without confirmation")
+
+    if sized:
+        opp = sized[0]
         if opp.size_label != "42":
             failures.append(f"wrong size alerted: {opp.size_label}")
         # Derived from the live config, not hardcoded: fee literals here went
@@ -312,16 +328,22 @@ async def _cmd_report(args) -> int:
     print(f"=== LIVE SELL-NOW OPPORTUNITIES: {len(live)} "
           f"(verified against live bids just now) ===")
     for profit, o, price, md, size_ok in sorted(live, key=lambda x: -x[0])[:args.limit]:
-        flag = ("size in stock" if size_ok else
-                "SIZE NOT IN STOCK" if size_ok is False else "size stock UNKNOWN")
+        if o.sizeless:
+            flag = "no size (single variant)"
+        else:
+            flag = ("size in stock" if size_ok else
+                    "SIZE NOT IN STOCK" if size_ok is False else
+                    "size stock UNKNOWN")
+        where = "—" if o.sizeless else f"EU {o.size_label}"
         print(f"\n  €{profit:+8.2f}  {o.stockx.title[:52]}")
-        print(f"            EU {o.size_label} @ {o.retail.retailer} €{price:.2f}"
+        print(f"            {where} @ {o.retail.retailer} €{price:.2f}"
               f" | live bid €{md.highest_bid:.0f} | {flag}")
         print(f"            {o.retail.url}")
     if gone:
         print(f"\n=== no longer viable: {len(gone)} ===")
         for o, why in gone[:args.limit]:
-            print(f"  {o.stockx.title[:44]:46} EU {str(o.size_label):<6} {why}")
+            size = "—" if o.sizeless else f"EU {o.size_label}"
+            print(f"  {o.stockx.title[:44]:46} {size:<9} {why}")
     open_reviews = ro.execute(
         "SELECT COUNT(*) FROM review_queue WHERE resolved=0").fetchone()[0]
     if open_reviews:
@@ -337,7 +359,8 @@ def _print_stored(rows, ro, limit: int) -> None:
         try:
             p = _json.loads(r["payload_json"])
             sn = (p.get("sell_now") or {}).get("profit")
-            label = (f"{p['stockx'].get('title')} EU {p['size_label']} @ "
+            size = f"EU {p['size_label']} " if p.get("size_label") else ""
+            label = (f"{p['stockx'].get('title')} {size}@ "
                      f"{p['retail']['retailer']} €{p['retail']['price']:.0f}")
         except Exception:
             sn, label = None, r["key"]

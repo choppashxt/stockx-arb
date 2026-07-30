@@ -12,7 +12,7 @@ import re
 from typing import Optional
 
 from ..db import Database
-from ..matching import style_ids_match
+from ..matching import code_in_title, style_ids_match
 from ..models import StockXProduct, StockXVariant
 from .client import StockXAPIError, StockXClient
 
@@ -117,11 +117,28 @@ class CatalogResolver:
                                 ) -> tuple[Optional[StockXProduct], float]:
         for rank, code in enumerate(candidates):
             data = await self.client.search(code, page_size=10)
-            for hit in data.get("products") or []:
+            hits = data.get("products") or []
+            for hit in hits:
                 if style_ids_match(code, hit.get("styleId")):
                     product = _product_from_search_hit(hit)
                     confidence = 1.0 if rank == 0 else 0.95
                     log.info("resolved %s -> %s (%s) conf=%.2f",
+                             code, product.product_id, product.title, confidence)
+                    return product, confidence
+            # Non-sneaker categories carry an EMPTY styleId, so the loop above
+            # can never match them. Their identifying code sits in the title
+            # ('... Set 75192', '... GA-110PKM-7A') instead.
+            #
+            # Only consulted when the hit has NO styleId at all: a product that
+            # HAS a code which failed to match is evidence AGAINST the match,
+            # and the title must not be used to talk us past it.
+            for hit in hits:
+                if (hit.get("styleId") or "").strip():
+                    continue
+                if code_in_title(code, hit.get("title")):
+                    product = _product_from_search_hit(hit)
+                    confidence = 1.0 if rank == 0 else 0.95
+                    log.info("resolved %s -> %s (%s) via title code conf=%.2f",
                              code, product.product_id, product.title, confidence)
                     return product, confidence
 

@@ -11,6 +11,7 @@ from urllib.parse import quote_plus
 import httpx
 
 from .config import Secrets
+from .matching import region_marker
 from .models import Opportunity, ProfitBreakdown
 from .profit import alias_breakeven_price
 
@@ -62,7 +63,16 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
     if reason != "new":
         header += f"  [{reason}]"
 
-    if o.retail.size_stock_unverified:
+    if o.sizeless:
+        # single-variant product (Lego, cards, electronics, watches): there is
+        # no size, so the only thing to state is the code and the condition
+        # StockX will authenticate against
+        size_line = (f"{o.retail.style_code or '?'} · one variant, no size"
+                     + (f" · {o.retail.category}" if o.retail.category else "")
+                     + (f" · {marker}" if (marker := region_marker(o.stockx.title))
+                        else "")
+                     + " · StockX authenticates these SEALED")
+    elif o.retail.size_stock_unverified:
         # never assert a size we can't verify: the size named is only the best
         # live-bid candidate among the labels the retailer lists — whether THAT
         # size is in stock is unknown until the human checks (audit 0.1)
@@ -94,7 +104,8 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
         _fmt_scenario(o.list_ask, "List @ ask"),
         "Liquidity: " + " / ".join(liq_bits),
         f"Confidence {o.match_confidence:.2f}"
-        + (" · size ✅ barcode-exact" if o.size_match_method == "barcode"
+        + ("" if o.sizeless
+           else " · size ✅ barcode-exact" if o.size_match_method == "barcode"
            else " · size via size chart")
         + f" · score {o.score:.0f}"
         + (f" · ~{o.est_days_to_clear}d to clear" if o.est_days_to_clear else ""),
