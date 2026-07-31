@@ -9,6 +9,7 @@ from .ballzy import BallzyScraper
 from .rademar import RademarScraper
 from .reede import ReedeScraper
 from .footshop import FootshopScraper
+from .klick import KlickScraper
 from .overkill import OverkillScraper
 from .sns import SnsScraper
 from .sportland import SportlandLTScraper, SportlandLVScraper, SportlandScraper
@@ -35,6 +36,7 @@ _SCRAPERS: dict[str, type[RetailerScraper]] = {
     # clients (verified 2026-07-27) — skipped per the no-anti-detection rule.
     # Non-sneaker categories (sizeless: one StockX variant, no size)
     "apollo": ApolloScraper,            # Lego sets; ld+json with sku + gtin
+    "klick": KlickScraper,              # electronics; matched by EAN only
 }
 
 

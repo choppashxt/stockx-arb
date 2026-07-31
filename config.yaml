@@ -220,6 +220,28 @@ retailers:
     max_pages: 20                   # 20 child sitemaps in the index
     slug_filters: [lego]
 
+  klick:
+    # Estonian electronics, matched by BARCODE only — StockX gives electronics
+    # an empty styleId and no MPN in the title, so the EAN is the only key.
+    #
+    # Expect most of these to be REFUSED by the region gate: StockX lists the
+    # US/EU/UK plug variants separately and an Estonian listing rarely states
+    # which it is. That refusal is the point — a mismatched unit fails
+    # authentication while looking correct in the name.
+    enabled: true
+    scan_interval_minutes: 240
+    request_delay_seconds: 2.5      # robots sets Crawl-delay 2 for GPTBot only
+    sitemap_slice_per_scan: 60
+    sitemap_refresh_hours: 24
+    # 16k products, almost none resellable on StockX. First live run: 'iphone'
+    # matched 1875 URLs that were overwhelmingly CASES and SCREEN PROTECTORS
+    # (EUR 9.99 each) — 58 barcode lookups, 0 hits on StockX. Apple/laptop
+    # keywords are accessory magnets, so they are out; consoles and audio are
+    # the categories StockX actually trades.
+    slug_filters: [playstation-5, ps5-, xbox-series, nintendo-switch,
+                   airpods-max, airpods-pro, dyson-airwrap, meta-quest,
+                   steam-deck]
+
   overkill:
     # Berlin boutique; hype-heavy stock. Ships to Estonia: DHL EUR13, 2-5 days
     # (verified on their shipping page 2026-07-27) â€” charged as landed cost.

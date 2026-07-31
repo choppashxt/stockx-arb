@@ -210,6 +210,45 @@ class CatalogResolver:
                      variant.size)
         return variant
 
+    async def resolve_by_gtin(self, gtin: str
+                              ) -> tuple[Optional[StockXProduct], float]:
+        """Barcode -> a FULL StockX product, for categories with no usable code.
+
+        Electronics titles carry no MPN and an empty styleId, so a barcode is
+        the only exact key available. `resolve_gtin` alone is not enough: it
+        returns a variant with a product_id but no title or URL, and an
+        Opportunity needs the whole product — which is why the barcode path
+        never actually worked before (audit: `get_product` had never been
+        called by anything).
+
+        Two API calls, both cached: the GTIN lookup and the product fetch.
+        Confidence 1.0 — a barcode names one product with nothing to infer.
+        """
+        variant = await self.resolve_gtin(gtin)
+        if variant is None:
+            return None, 0.0
+        cache_key = f"gtinprod:{variant.product_id}"
+        cached = self.db.get_resolution(cache_key, self.negative_cache_days)
+        if cached is not None:
+            return cached
+        if self.client is None:
+            return None, 0.0
+        try:
+            data = await self.client.get_product(variant.product_id)
+        except StockXAPIError as e:
+            if e.status in (400, 404):
+                self.db.put_resolution(cache_key, None, 0.0)
+                return None, 0.0
+            raise
+        if not data:
+            self.db.put_resolution(cache_key, None, 0.0)
+            return None, 0.0
+        product = _product_from_search_hit(data)
+        self.db.put_resolution(cache_key, product, 1.0)
+        log.info("gtin %s -> %s (%s) conf=1.00", gtin, product.product_id[:8],
+                 product.title)
+        return product, 1.0
+
     async def variants(self, product_id: str) -> list[StockXVariant]:
         cached = self.db.get_variants(product_id)
         if cached or self.client is None:

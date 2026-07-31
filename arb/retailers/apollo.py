@@ -29,6 +29,7 @@ from typing import Optional
 
 from ..models import Product
 from .base import RetailerScraper
+from .ldjson import gtin_of, ld_products as _ld_products, offer as _offer
 
 log = logging.getLogger(__name__)
 
@@ -56,27 +57,6 @@ _SKIP_CATEGORY = re.compile(r"\b(books?|raamat|literature|magazine|stationery)\b
                             re.I)
 
 
-def _ld_products(html: str) -> list[dict]:
-    """Every schema.org Product block on the page."""
-    out = []
-    for block in re.findall(
-            r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>',
-            html, re.S):
-        try:
-            data = json.loads(block)
-        except json.JSONDecodeError:
-            continue
-        for item in (data if isinstance(data, list) else [data]):
-            if isinstance(item, dict) and item.get("@type") == "Product":
-                out.append(item)
-    return out
-
-
-def _offer(item: dict) -> dict:
-    offers = item.get("offers") or {}
-    if isinstance(offers, list):
-        return offers[0] if offers and isinstance(offers[0], dict) else {}
-    return offers if isinstance(offers, dict) else {}
 
 
 def set_number_from_name(name: str) -> Optional[str]:
@@ -170,8 +150,7 @@ class ApolloScraper(RetailerScraper):
         availability = str(offer.get("availability") or "")
         in_stock = "InStock" in availability or "PreOrder" in availability
 
-        gtin = str(item.get("gtin") or item.get("gtin13")
-                   or item.get("gtin12") or "").strip() or None
+        gtin = gtin_of(item)
 
         return Product(
             retailer=self.name, name=name,

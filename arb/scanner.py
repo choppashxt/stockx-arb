@@ -125,7 +125,9 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
 
 
 def _cheap_screen(p: Product, cfg: AppConfig) -> bool:
-    return (p.in_stock and p.style_code is not None
+    # A barcode is a usable key on its own (electronics have no style code at
+    # all), so either identifier is enough to be worth evaluating.
+    return (p.in_stock and (p.style_code is not None or p.ean is not None)
             and 0 < p.price <= cfg.filters.max_retail_price_eur
             and p.currency == "EUR")
 
@@ -141,9 +143,15 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
     candidates = style_code_candidates_from_sku(product.style_code or "")
     if product.style_code and product.style_code not in candidates:
         candidates.insert(0, product.style_code)
-    sx_product, confidence = await resolver.resolve(
-        candidates or [product.style_code or ""],
-        brand=product.brand, name=product.name)
+    sx_product, confidence = None, 0.0
+    if product.style_code:
+        sx_product, confidence = await resolver.resolve(
+            candidates or [product.style_code],
+            brand=product.brand, name=product.name)
+    # Barcode-first fallback. Electronics carry no MPN in the StockX title and
+    # an empty styleId, so for them the EAN is the ONLY exact key there is.
+    if sx_product is None and product.ean:
+        sx_product, confidence = await resolver.resolve_by_gtin(product.ean)
     if sx_product is None:
         return [], False
     if confidence < cfg.filters.alert_min_confidence:
