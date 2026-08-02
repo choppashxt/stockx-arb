@@ -113,7 +113,17 @@ class CatalogResolver:
         cache_key = candidates[0]
         cached = self.db.get_resolution(cache_key, self.negative_cache_days)
         if cached is not None:
-            return cached
+            if self._cached_match_still_valid(cache_key, cached, brand):
+                return cached
+            # A matching rule has tightened since this row was written. Positive
+            # resolutions never expire, so without this the fix would only ever
+            # apply to codes nobody had looked up yet — the SET guard added
+            # 2026-07-28 left 'BV2671-410 -> Hoodie & Joggers Set' cached from
+            # 07-27 and it alerted again on 08-02, pricing joggers against the
+            # set's bid. Drop it and resolve again under the current rules.
+            log.warning("cached match for %s no longer satisfies the matching "
+                        "rules — dropping and re-resolving", cache_key)
+            self.db.drop_resolution(cache_key)
         if self.client is None:
             # offline/fixture mode: only pre-seeded resolutions exist; don't
             # write a negative cache entry the real provider would inherit
@@ -128,6 +138,26 @@ class CatalogResolver:
         self.db.put_resolution(cache_key, product, confidence)
         return product, confidence
 
+    def _cached_match_still_valid(self, cache_key: str,
+                                  cached: tuple[Optional[StockXProduct], float],
+                                  brand: Optional[str]) -> bool:
+        """Re-check a cached hit against today's matching rules.
+
+        Only exact matches are re-checked. Fuzzy hits (0.5) never satisfied
+        `style_ids_match` by definition and can never alert, so re-validating
+        them would just re-resolve them forever.
+        """
+        product, confidence = cached
+        if product is None or confidence < 0.95:
+            return True
+        if style_ids_match(cache_key, product.style_id, product.title):
+            return True
+        if not (product.style_id or "").strip():
+            # title-code path: needs the code in the title AND brand agreement
+            return (_brands_agree(brand, product.brand)
+                    and code_in_title(cache_key, product.title))
+        return False
+
     async def _resolve_uncached(self, candidates: list[str],
                                 brand: Optional[str], name: Optional[str]
                                 ) -> tuple[Optional[StockXProduct], float]:
@@ -135,7 +165,7 @@ class CatalogResolver:
             data = await self.client.search(code, page_size=10)
             hits = data.get("products") or []
             for hit in hits:
-                if style_ids_match(code, hit.get("styleId")):
+                if style_ids_match(code, hit.get("styleId"), hit.get("title")):
                     product = _product_from_search_hit(hit)
                     confidence = 1.0 if rank == 0 else 0.95
                     log.info("resolved %s -> %s (%s) conf=%.2f",

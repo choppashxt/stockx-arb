@@ -65,16 +65,40 @@ def style_code_candidates_from_sku(sku: str) -> list[str]:
     return ["-".join(c) for c in candidates]
 
 
-def style_ids_match(retail_code: str, stockx_style_id: Optional[str]) -> bool:
+# A multi-item SET names one garment per code, so a component code must not be
+# matched on its own. Detected from the TITLE, which is the only reliable signal:
+# StockX writes these as 'Hoodie & Joggers Set', '... 2-Piece Set'.
+_MULTI_ITEM_TITLE = re.compile(
+    r"\bsets?\b|\b\d\s*-?\s*piece\b|\btwo[- ]piece\b", re.I)
+
+
+def is_multi_item_title(title: Optional[str]) -> bool:
+    return bool(_MULTI_ITEM_TITLE.search(title or ""))
+
+
+def style_ids_match(retail_code: str, stockx_style_id: Optional[str],
+                    stockx_title: Optional[str] = None) -> bool:
     """Exact match against a StockX styleId, tolerant of separator noise.
 
-    StockX sometimes packs several *forms of the same code* into one field
-    ('DD1391-100/DD1391 100') — those are fine to match component-wise.
-    But multi-item sets ('FB7921-473/FB8002-473', hoodie + joggers) list one
-    code PER GARMENT: matching a single garment's code against one component
-    would price the part against the whole set's bid (audit 3.1). When the
-    components normalize to different codes, only the full combined code
-    (i.e. the retailer is also selling the set) may match."""
+    StockX packs several codes into this one field for two very different
+    reasons, and telling them apart is the whole job:
+
+    1. ONE product with more than one code — a re-issued shoe carrying both
+       ('315122-111/CW2288-111', Air Force 1 Low '07), a width variant
+       ('1013255/1013256', Birkenstock Boston), or just formatting noise
+       ('DD1391-100/DD1391 100'). Matching a single component here is CORRECT;
+       refusing it loses a real product.
+    2. A multi-item SET listing one code PER GARMENT ('FB7921-473/FB8002-473',
+       hoodie + joggers). Matching one component prices a single garment
+       against the whole set's bid — which is what alerted a pair of Rademar
+       joggers against a hoodie-and-joggers bid on 2026-08-02.
+
+    The first guard at this spot keyed on code shape (do the components
+    normalize differently?), which describes BOTH cases and so refused 170
+    legitimate products as collateral. The title is what actually separates
+    them, so pass `stockx_title` whenever it is available; without it, a
+    multi-code styleId falls back to requiring the full combined code.
+    """
     if not stockx_style_id:
         return False
     want = normalize_style_code(retail_code)
@@ -87,7 +111,12 @@ def style_ids_match(retail_code: str, stockx_style_id: Optional[str]) -> bool:
         return False
     if len(set(parts)) == 1:            # formatting variants of one code
         return want == parts[0]
-    return want == normalize_style_code(stockx_style_id)
+    if want == normalize_style_code(stockx_style_id):
+        return True                     # retailer sells the whole thing
+    if stockx_title is None or is_multi_item_title(stockx_title):
+        # a set, or no title to judge by: a component alone is not enough
+        return False
+    return want in parts                # alternate codes for a single product
 
 
 def code_in_title(retail_code: str, stockx_title: Optional[str]) -> bool:

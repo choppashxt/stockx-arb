@@ -44,16 +44,52 @@ class TestStyleIdsMatch:
         # StockX packs several FORMS of the same code into one field
         assert style_ids_match("DD1391-100", "DD1391-100/DD1391 100")
 
+    SET_TITLE = ("Nike Sportswear Tech Fleece Full-Zip Hoodie & Joggers Set "
+                 "Light University Blue")
+
     def test_set_component_must_not_match(self):
         # audit 3.1: 'FB7921-473/FB8002-473' is a hoodie+joggers SET, one code
         # per garment. The joggers alone must not be priced against the set bid.
-        assert not style_ids_match("FB7921-473", "FB7921-473/FB8002-473")
-        assert not style_ids_match("FB8002-473", "FB7921-473/FB8002-473")
+        assert not style_ids_match("FB7921-473", "FB7921-473/FB8002-473",
+                                   self.SET_TITLE)
+        assert not style_ids_match("FB8002-473", "FB7921-473/FB8002-473",
+                                   self.SET_TITLE)
+
+    def test_real_alert_that_slipped_through(self):
+        """Fired 2026-08-02: Rademar sold the joggers alone, StockX wants the
+        pair. The guard was right — the cached match predated it."""
+        assert not style_ids_match(
+            "BV2671-410", "BV2645-410/BV2671-410",
+            "Nike Sportswear Club Fleece Full-Zip Hoodie & Joggers Set "
+            "Midnight Navy/Midnight Navy/White")
 
     def test_full_set_code_still_matches(self):
         # a retailer selling the actual set may match the combined code
         assert style_ids_match("FB7921-473/FB8002-473",
-                               "FB7921-473/FB8002-473")
+                               "FB7921-473/FB8002-473", self.SET_TITLE)
+
+    def test_dual_coded_single_products_DO_match(self):
+        """The first version of this guard keyed on code shape, which describes
+        a set AND a product carrying two codes — and so refused 170 legitimate
+        products. These are all one item, and a component must match."""
+        assert style_ids_match("CW2288-111", "315122-111/CW2288-111",
+                               "Nike Air Force 1 Low '07 White")
+        assert style_ids_match("1013255", "1013255/1013256",
+                               "Birkenstock Boston Soft Footbed Iron Grey")
+        assert style_ids_match("IO8116-600", "IO8116-600 / IO8117-600",
+                               "Nike Air Zoom GT Cut 4 Kay Yow")
+
+    def test_other_multi_item_phrasings(self):
+        for title in ["Nike Tech Fleece Hoodie/Pant Set Royal Blue",
+                      "adidas Tiro 2-Piece Tracksuit",
+                      "Nike Two-Piece Set Black"]:
+            assert not style_ids_match("AA1111-100", "AA1111-100/BB2222-100",
+                                       title), title
+
+    def test_no_title_refuses_a_component(self):
+        """Without a title there is no way to tell a set from a dual code, and
+        the expensive mistake is the set — so decline."""
+        assert not style_ids_match("FB7921-473", "FB7921-473/FB8002-473")
 
     def test_none_and_empty(self):
         assert not style_ids_match("DD1391-100", None)

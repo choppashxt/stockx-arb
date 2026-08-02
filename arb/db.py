@@ -180,6 +180,14 @@ class Database:
             return (None, 0.0)
         return (StockXProduct.model_validate_json(row["product_json"]), row["confidence"])
 
+    def drop_resolution(self, cache_key: str) -> None:
+        """Forget a cached match. Used when a cached hit no longer satisfies the
+        current matching rules, so a logic fix can heal already-poisoned rows
+        instead of only applying to codes nobody has looked up yet."""
+        self.conn.execute("DELETE FROM stockx_products WHERE cache_key=?",
+                          (cache_key,))
+        self.conn.commit()
+
     def put_resolution(self, cache_key: str, product: Optional[StockXProduct],
                        confidence: float) -> None:
         self.conn.execute(
