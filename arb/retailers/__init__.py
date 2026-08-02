@@ -14,6 +14,7 @@ from .overkill import OverkillScraper
 from .sns import SnsScraper
 from .sportland import SportlandLTScraper, SportlandLVScraper, SportlandScraper
 from .teamsport import TeamsportScraper
+from .weekend import WeekendScraper
 
 _SCRAPERS: dict[str, type[RetailerScraper]] = {
     # Tier 1 — Estonia
@@ -22,6 +23,7 @@ _SCRAPERS: dict[str, type[RetailerScraper]] = {
     "teamsport": TeamsportScraper,
     "sportland": SportlandScraper,
     "rademar": RademarScraper,
+    "weekend": WeekendScraper,      # ScandiPWA/Magento GraphQL; real per-size stock
     # sportsdirect.ee: drops connections to non-browser clients (Frasers bot
     # wall, verified 2026-07-27). Skipped per the no-anti-detection guardrail.
     # Tier 2 — Baltics (same Sportland platform, different domain/sitemap;

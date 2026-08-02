@@ -32,6 +32,10 @@ class Product(BaseModel):
     name: str
     brand: Optional[str] = None
     style_code: Optional[str] = None    # normalized manufacturer code, e.g. HQ2010-005
+    # The retailer's OWN product id, when it differs from the manufacturer code
+    # and is needed to look the product up again (weekend.ee prefixes its SKUs:
+    # 'NIDM0113-100' for style code 'DM0113-100'). Used by enrich().
+    retailer_sku: Optional[str] = None
     # What kind of thing this is: "sneakers", "apparel", "collectibles",
     # "electronics". Set by the scraper, shown on sizeless alerts so the human
     # knows what condition StockX will authenticate against (sealed box vs shoe).

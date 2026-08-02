@@ -203,6 +203,22 @@ retailers:
     slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, yeezy, dunk, samba]
 
+  weekend:
+    # weekend.ee — ScandiPWA storefront, catalog read from its Magento GraphQL
+    # endpoint (HTML is a JS bundle, nothing server-rendered). Gives REAL
+    # per-size stock, unlike Sportland, and SKUs contain the manufacturer style
+    # code behind a two-letter brand prefix ('NIDM0113-100' -> 'DM0113-100').
+    #
+    # ~47,900 products, the large majority from brands StockX does not trade,
+    # so slug_filters is used as a BRAND ALLOWLIST and enumeration happens per
+    # brand — nothing outside it ever costs a StockX resolution.
+    enabled: true
+    scan_interval_minutes: 30
+    request_delay_seconds: 2.5
+    max_pages: 12                   # per brand, 50 products a page
+    slug_filters: [nike, jordan, adidas, new balance, asics, puma, saucony,
+                   crocs, ugg, vans, converse, hoka, salomon, reebok]
+
   apollo:
     # First non-sneaker retailer: Lego sets (sealed collectibles). Estonian, so
     # no reshipping to model. Catalog comes from the sitemaps only — robots.txt
