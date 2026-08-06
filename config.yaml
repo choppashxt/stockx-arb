@@ -100,6 +100,11 @@ retailers:
     sale_discount_pct: 0.15
     buy_note: "sale items take a further 15% at checkout"
     categories:
+      # Sale sections FIRST: every product here is marked down, which is where
+      # essentially all real spreads live. Verified 2026-08-06 — /en/men/sale
+      # returns 120 products, 100% of them discounted, up to 73% off.
+      - /en/men/sale
+      - /en/women/sale
       - /en/men/sneakers
       - /en/women/sneakers
     max_pages: 50                 # per category; 60 products per page
