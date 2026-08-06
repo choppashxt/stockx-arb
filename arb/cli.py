@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import sys
+from typing import Optional
 
 # The AV product on this machine injects SSLKEYLOGFILE=\\.\aswMonFltProxy\<handle>
 # into every process it launches. ssl.create_default_context() honours that
@@ -368,6 +369,179 @@ def _print_stored(rows, ro, limit: int) -> None:
               f"{r['last_alerted'][:16]}  {label}")
 
 
+async def _cmd_watch(args) -> int:
+    """Watch one variant you have already bought.
+
+    Different job from `scan`: that hunts for things to buy, this babysits a
+    position you are already exposed on. The dangerous case for an owned pair
+    is the bid QUIETLY DISAPPEARING between purchase and delivery — you cannot
+    ship what has not arrived, so the sale window can close while the item is
+    still in transit. Silence must not read as "still fine", so this reports
+    the bid going away as loudly as it reports it moving.
+    """
+    from datetime import datetime, timezone
+
+    from .models import MarketData
+    from .profit import scenarios
+
+    cfg = load_config(args.config)
+    secrets = Secrets()
+    if not secrets.stockx_configured:
+        log.error("STOCKX_* credentials missing in .env")
+        return 2
+    db = Database(cfg.db_file)
+    client, _, _ = _build_stockx(cfg, secrets, db)
+    notifier: Notifier = _build_notifier(cfg, secrets, args.dry_run)
+    name = args.label or args.variant[:8]
+
+    deadline = None
+    if args.until:
+        # A bare date means "through the END of that day". Parsing it as
+        # midnight would stop the watch at 00:00 on the delivery date — before
+        # the parcel arrives, which is exactly when you still need it running.
+        parsed = datetime.fromisoformat(args.until)
+        if parsed.hour == parsed.minute == parsed.second == 0:
+            parsed = parsed.replace(hour=23, minute=59, second=59)
+        deadline = parsed.replace(tzinfo=timezone.utc)
+
+    def breakeven(bid: float) -> float:
+        sn, _ = scenarios(args.paid,
+                          MarketData(variant_id=args.variant, currency="EUR",
+                                     highest_bid=bid), cfg.profit, cfg.vat)
+        return sn.profit if sn else float("-inf")
+
+    state_key = f"watch:{args.variant}"
+    last_raw = db.kv_get(state_key)
+    # None = never watched before; "" = watched, and there was no bid. Only the
+    # second is a real transition worth announcing, so a first run records a
+    # baseline silently instead of pinging you about a bid you already know about.
+    first_run = last_raw is None
+    last_bid: Optional[float] = float(last_raw) if last_raw else None
+    log.info("watching %s — paid €%.2f, checking every %dmin%s",
+             name, args.paid, args.every,
+             f", until {args.until}" if args.until else "")
+
+    try:
+        while True:
+            if deadline and datetime.now(timezone.utc) >= deadline:
+                log.info("watch window for %s ended", name)
+                return 0
+            try:
+                rows = await client.get_product_market_data(args.product,
+                                                            cfg.stockx.currency)
+            except StockXAPIError as e:
+                log.warning("market data failed for %s: %s", name, e.message)
+                await asyncio.sleep(args.every * 60)
+                continue
+
+            bid = None
+            for row in rows:
+                if row.get("variantId") == args.variant:
+                    raw = row.get("highestBidAmount")
+                    bid = float(raw) if raw not in (None, "", "null") else None
+                    break
+
+            msg = None
+            if first_run:
+                log.info("%s: baseline bid %s (profit %s)", name,
+                         f"€{bid:.0f}" if bid is not None else "none",
+                         f"€{breakeven(bid):+.2f}" if bid is not None else "n/a")
+                first_run = False
+            elif bid is None and last_bid is not None:
+                msg = (f"🔴 BID GONE — {name}\n"
+                       f"The €{last_bid:.0f} bid has disappeared. There is now no "
+                       f"live bid on your size.\n"
+                       f"You paid €{args.paid:.2f}. Sell-now is not available; "
+                       f"you would have to list at ask and wait.")
+            elif bid is not None and last_bid is None:
+                msg = (f"🟢 BID BACK — {name}\n"
+                       f"A live bid of €{bid:.0f} exists again → "
+                       f"profit €{breakeven(bid):+.2f} if you sell now.")
+            elif bid is not None and last_bid is not None:
+                delta = bid - last_bid
+                if abs(delta) >= args.move:
+                    arrow = "📈" if delta > 0 else "📉"
+                    msg = (f"{arrow} BID MOVED — {name}\n"
+                           f"€{last_bid:.0f} → €{bid:.0f} ({delta:+.0f})\n"
+                           f"Sell-now profit is now €{breakeven(bid):+.2f} "
+                           f"on your €{args.paid:.2f} cost.")
+                elif breakeven(bid) < 0 <= breakeven(last_bid):
+                    msg = (f"⚠️ UNDERWATER — {name}\n"
+                           f"Bid €{bid:.0f} no longer covers your €{args.paid:.2f} "
+                           f"cost after fees (profit €{breakeven(bid):+.2f}).")
+
+            if msg:
+                if not await notifier.send(msg):
+                    log.warning("watch alert delivery failed; will retry next check")
+                else:
+                    last_bid = bid
+                    db.kv_set(state_key, "" if bid is None else str(bid))
+            else:
+                last_bid = bid
+                db.kv_set(state_key, "" if bid is None else str(bid))
+                log.info("%s: bid %s (profit %s) — no change worth reporting",
+                         name,
+                         f"€{bid:.0f}" if bid is not None else "none",
+                         f"€{breakeven(bid):+.2f}" if bid is not None else "n/a")
+
+            await asyncio.sleep(args.every * 60)
+    finally:
+        await client.close()
+        await notifier.close()
+
+
+async def _cmd_sold(args) -> int:
+    """Log a completed sale, and show how far the fee model was off.
+
+    Every other number in this database is a prediction. This is the only
+    place a REAL outcome gets recorded, which makes it the only way to find
+    out whether the fee model is telling the truth.
+    """
+    from .models import MarketData
+    from .profit import scenarios
+
+    cfg = load_config(args.config)
+    db = Database(cfg.db_file)
+
+    predicted = None
+    if args.bid:
+        sn, _ = scenarios(args.paid,
+                          MarketData(variant_id=args.variant or "x",
+                                     currency="EUR", highest_bid=args.bid),
+                          cfg.profit, cfg.vat)
+        predicted = sn.payout if sn else None
+
+    row_id = db.record_sale(
+        retailer=args.retailer, style_code=args.code, title=args.title,
+        size_label=args.size, variant_id=args.variant, paid_eur=args.paid,
+        bid_eur=args.bid, payout_eur=args.payout,
+        predicted_payout=predicted, note=args.note)
+
+    profit = args.payout - args.paid
+    print(f"logged sale #{row_id}: {args.title or args.code or '?'}")
+    print(f"  paid    €{args.paid:.2f}")
+    if args.bid:
+        print(f"  sold at €{args.bid:.2f} bid")
+    print(f"  payout  €{args.payout:.2f}")
+    print(f"  PROFIT  €{profit:+.2f}  ({profit / args.paid * 100:+.0f}%)")
+    if predicted is not None:
+        gap = args.payout - predicted
+        print(f"  model predicted €{predicted:.2f} -> off by €{gap:+.2f}"
+              + ("  (model OPTIMISTIC)" if gap < 0 else "  (model conservative)"
+                 if gap > 0 else ""))
+
+    sales = db.sales()
+    if len(sales) > 1:
+        gaps = [s["payout_eur"] - s["predicted_payout"] for s in sales
+                if s["predicted_payout"] is not None]
+        if gaps:
+            print()
+            print(f"  across {len(gaps)} logged sales: model off by "
+                  f"€{sum(gaps) / len(gaps):+.2f} on average")
+    db.close()
+    return 0
+
+
 async def _cmd_dashboard(args) -> int:
     import asyncio as _asyncio
 
@@ -456,6 +630,43 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("--no-verify", action="store_true",
                           help="print stored history without re-checking StockX")
     p_report.set_defaults(func=_cmd_report)
+
+    p_watch = sub.add_parser(
+        "watch", help="watch the live bid on ONE variant you already own "
+                      "(alerts when it moves, drops below your floor, or vanishes)")
+    p_watch.add_argument("--variant", required=True,
+                         help="StockX variant id (from an alert payload)")
+    p_watch.add_argument("--product", required=True,
+                         help="StockX product id the variant belongs to")
+    p_watch.add_argument("--paid", type=float, required=True,
+                         help="what the pair cost you, landed, in EUR")
+    p_watch.add_argument("--label", default="",
+                         help="human name for the alerts")
+    p_watch.add_argument("--every", type=int, default=20,
+                         help="minutes between checks (default 20)")
+    p_watch.add_argument("--until", default=None,
+                         help="stop after this UTC date, e.g. 2026-08-10")
+    p_watch.add_argument("--move", type=float, default=10.0,
+                         help="EUR change in the bid worth telling you about")
+    p_watch.add_argument("--dry-run", action="store_true",
+                         help="print to console instead of Discord")
+    p_watch.set_defaults(func=_cmd_watch)
+
+    p_sold = sub.add_parser(
+        "sold", help="log a completed sale (real payout vs what the model said)")
+    p_sold.add_argument("--paid", type=float, required=True,
+                        help="landed cost you actually paid, EUR")
+    p_sold.add_argument("--payout", type=float, required=True,
+                        help="what StockX actually paid you, EUR")
+    p_sold.add_argument("--bid", type=float, default=None,
+                        help="the bid you sold into, EUR")
+    p_sold.add_argument("--retailer", default="")
+    p_sold.add_argument("--code", default="", help="style code")
+    p_sold.add_argument("--title", default="")
+    p_sold.add_argument("--size", default="")
+    p_sold.add_argument("--variant", default="")
+    p_sold.add_argument("--note", default="")
+    p_sold.set_defaults(func=_cmd_sold)
 
     p_dash = sub.add_parser("dashboard", help="live web dashboard (read-only)")
     p_dash.add_argument("--host", default="127.0.0.1")

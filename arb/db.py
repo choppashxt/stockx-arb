@@ -94,6 +94,25 @@ CREATE TABLE IF NOT EXISTS scan_log (
     opportunities INTEGER,
     alerts_sent   INTEGER
 );
+-- Completed sales, entered by hand after money actually lands. This is the
+-- only place REAL outcomes live: everything else in this DB is a prediction.
+-- Comparing predicted_payout against payout_eur is what tells us whether the
+-- fee model matches reality (the first logged sale showed the model EUR 3.80
+-- optimistic, because shipping_to_stockx_eur was set below the true label cost).
+CREATE TABLE IF NOT EXISTS sales (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    sold_at           TEXT,
+    retailer          TEXT,
+    style_code        TEXT,
+    title             TEXT,
+    size_label        TEXT,
+    variant_id        TEXT,
+    paid_eur          REAL,      -- landed cost you actually paid
+    bid_eur           REAL,      -- the bid you sold into
+    payout_eur        REAL,      -- what StockX actually paid you
+    predicted_payout  REAL,      -- what the fee model said you would get
+    note              TEXT
+);
 CREATE TABLE IF NOT EXISTS kv (
     k TEXT PRIMARY KEY,
     v TEXT
@@ -179,6 +198,27 @@ class Database:
                 return None
             return (None, 0.0)
         return (StockXProduct.model_validate_json(row["product_json"]), row["confidence"])
+
+    def record_sale(self, *, retailer: str, style_code: Optional[str],
+                    title: Optional[str], size_label: Optional[str],
+                    variant_id: Optional[str], paid_eur: float,
+                    bid_eur: Optional[float], payout_eur: float,
+                    predicted_payout: Optional[float],
+                    note: str = "") -> int:
+        """Log a completed sale. Returns the new row id."""
+        cur = self.conn.execute(
+            """INSERT INTO sales (sold_at, retailer, style_code, title,
+                                  size_label, variant_id, paid_eur, bid_eur,
+                                  payout_eur, predicted_payout, note)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (_now(), retailer, style_code, title, size_label, variant_id,
+             paid_eur, bid_eur, payout_eur, predicted_payout, note))
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def sales(self) -> list:
+        return self.conn.execute(
+            "SELECT * FROM sales ORDER BY sold_at").fetchall()
 
     def drop_resolution(self, cache_key: str) -> None:
         """Forget a cached match. Used when a cached hit no longer satisfies the
