@@ -10,6 +10,13 @@ from typing import Optional
 
 from .models import MarketData, Product, StockXProduct, StockXVariant
 
+# Columns added after the first deployments; SQLite has no "ADD COLUMN IF NOT
+# EXISTS", so they are applied defensively at open time.
+_MIGRATIONS = [
+    "ALTER TABLE retail_products ADD COLUMN on_sale INTEGER DEFAULT 0",
+    "ALTER TABLE retail_products ADD COLUMN list_price REAL",
+]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS retail_products (
     retailer     TEXT NOT NULL,
@@ -21,6 +28,8 @@ CREATE TABLE IF NOT EXISTS retail_products (
     currency     TEXT,
     sizes_json   TEXT,
     in_stock     INTEGER,
+    on_sale      INTEGER DEFAULT 0,   -- marked down right now
+    list_price   REAL,                -- pre-markdown price, when the shop states it
     first_seen   TEXT,
     last_seen    TEXT,
     PRIMARY KEY (retailer, url)
@@ -130,6 +139,11 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        for statement in _MIGRATIONS:
+            try:
+                self.conn.execute(statement)
+            except sqlite3.OperationalError:
+                pass          # column already present
         self.conn.commit()
 
     def close(self) -> None:
@@ -163,15 +177,17 @@ class Database:
         self.conn.execute(
             """INSERT INTO retail_products
                (retailer, url, style_code, name, brand, price, currency, sizes_json,
-                in_stock, first_seen, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                in_stock, on_sale, list_price, first_seen, last_seen)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(retailer, url) DO UPDATE SET
                  style_code=excluded.style_code, name=excluded.name, brand=excluded.brand,
                  price=excluded.price, currency=excluded.currency,
                  sizes_json=excluded.sizes_json, in_stock=excluded.in_stock,
+                 on_sale=excluded.on_sale, list_price=excluded.list_price,
                  last_seen=excluded.last_seen""",
             (p.retailer, p.url, p.style_code, p.name, p.brand, p.price, p.currency,
-             sizes_json, int(p.in_stock), _now(), _now()))
+             sizes_json, int(p.in_stock), int(p.on_sale), p.list_price,
+             _now(), _now()))
         self.conn.commit()
         return flags
 

@@ -32,7 +32,8 @@ _SLUG_RE_TMPL = r"https://{host}/product/([a-z0-9_\-]{{3,120}})$"
 _LIST_QUERY = """
 { products(filter: {url_key: {in: [%s]}}, pageSize: %d) { items {
     sku name url_key stock_status
-    price_range { minimum_price { final_price { value currency } } }
+    price_range { minimum_price { final_price { value currency }
+                                  regular_price { value } } }
 } } }"""
 
 # Per-size stock IS knowable here (verified 2026-08-03), despite an earlier
@@ -50,7 +51,8 @@ _LIST_QUERY = """
 _DETAIL_QUERY = """
 { products(filter: {url_key: {eq: "%s"}}) { items {
     sku name stock_status
-    price_range { minimum_price { final_price { value currency } } }
+    price_range { minimum_price { final_price { value currency }
+                                  regular_price { value } } }
     ... on ConfigurableProduct {
       configurable_options { attribute_code values { label value_index } }
       variants { product { sku stock_status footwear_size } }
@@ -106,11 +108,13 @@ class SportlandScraper(RetailerScraper):
         url_key = (item.get("url_key") or "").strip()
         if not sku or not url_key:
             return None
-        price = (((item.get("price_range") or {}).get("minimum_price") or {})
-                 .get("final_price") or {})
+        minimum = ((item.get("price_range") or {}).get("minimum_price") or {})
+        price = minimum.get("final_price") or {}
         value = price.get("value")
         if not value or value <= 0:
             return None
+        regular = (minimum.get("regular_price") or {}).get("value")
+        list_price = float(regular) if regular else None
         candidates = style_code_candidates_from_sku(sku)
         return Product(
             retailer=self.name,
@@ -122,6 +126,11 @@ class SportlandScraper(RetailerScraper):
             sizes=[],
             in_stock=item.get("stock_status") == "IN_STOCK",
             price_verified=False,
+            # Discounted stock is where nearly every real spread lives: the one
+            # completed trade so far was a EUR 75.99 markdown against a EUR 176
+            # bid. Reporting it lets the scanner spend its API budget there first.
+            on_sale=bool(list_price and list_price > float(value) + 0.01),
+            list_price=list_price,
         )
 
     async def enrich(self, product: Product) -> Optional[Product]:
@@ -133,11 +142,15 @@ class SportlandScraper(RetailerScraper):
         item = items[0]
         enriched = product.model_copy(deep=True)
 
-        price = (((item.get("price_range") or {}).get("minimum_price") or {})
-                 .get("final_price") or {})
+        minimum = ((item.get("price_range") or {}).get("minimum_price") or {})
+        price = minimum.get("final_price") or {}
         if price.get("value"):
             enriched.price = round(float(price["value"]), 2)
             enriched.currency = price.get("currency") or "EUR"
+            regular = (minimum.get("regular_price") or {}).get("value")
+            if regular:
+                enriched.list_price = float(regular)
+                enriched.on_sale = float(regular) > enriched.price + 0.01
 
         sizes, unresolved = self._sizes_with_stock(item)
         variants = item.get("variants") or []

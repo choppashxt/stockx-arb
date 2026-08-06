@@ -75,6 +75,12 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
                      retailer_name, len(changed))
 
         candidates = [p for p in products if _cheap_screen(p, cfg)]
+        # Spend the scarce resource — market-data calls — on marked-down stock
+        # first. Full-price sneakers almost never beat a StockX bid; the only
+        # completed trade so far was a markdown (€75.99 against a €176 bid).
+        # market_calls_per_scan and the daily budget both cut this list off
+        # partway through, so the ORDER decides what actually gets priced.
+        candidates.sort(key=_discount_rank, reverse=True)
         if limit:
             candidates = candidates[:limit]
         stats.candidates = len(candidates)
@@ -122,6 +128,19 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
              "%d alerts", retailer_name, stats.products_seen, stats.candidates,
              stats.opportunities, stats.alerts_sent)
     return stats
+
+
+def _discount_rank(p: Product) -> float:
+    """How deeply discounted, as a fraction off the pre-markdown price.
+
+    0.0 for anything at full price or where the retailer does not state a
+    previous price — those still get scanned, just after the markdowns.
+    Retailers that never report `list_price` are unaffected: everything from
+    them ranks 0.0 and keeps its existing relative order.
+    """
+    if not p.on_sale or not p.list_price or p.list_price <= p.price:
+        return 0.0
+    return (p.list_price - p.price) / p.list_price
 
 
 def _cheap_screen(p: Product, cfg: AppConfig) -> bool:
