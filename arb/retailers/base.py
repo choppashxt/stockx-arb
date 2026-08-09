@@ -33,6 +33,21 @@ log = logging.getLogger(__name__)
 USER_AGENT = ("sneaker-arb-scanner/0.1 (personal hobby price comparison; "
               "contact: kaarmamarkus@gmail.com)")
 
+# Five of our retailers (weekend, reede, ballzy, sportland, teamsport) sit
+# behind Cloudflare, which scores bot reputation PER IP ACROSS ITS WHOLE
+# NETWORK. Per-host politeness is therefore not sufficient: each scraper paced
+# itself correctly while the machine as a whole fired 4+ requests at once
+# (run_loop gathers every retailer, and some crawl categories in parallel).
+# Cloudflare read that aggregate burst as a bot and challenged the strictest
+# sites — weekend.ee and reede.ee 403'd on the FIRST request of every scan and
+# contributed nothing for a day, while working perfectly standalone.
+#
+# This caps simultaneous outbound requests for the entire process. It is
+# deliberately low: the work is IO-bound and already delay-paced, so the cost
+# is a slightly longer cycle, and the benefit is not looking like a bot.
+MAX_CONCURRENT_REQUESTS = 2
+_REQUEST_SLOT = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+
 
 class PoliteFetcher:
     # stop pestering a host that is refusing us: after this many consecutive
@@ -69,7 +84,8 @@ class PoliteFetcher:
             return self._robots[host]
         rp = urllib.robotparser.RobotFileParser()
         try:
-            resp = await self._http.get(f"https://{host}/robots.txt")
+            async with _REQUEST_SLOT:
+                resp = await self._http.get(f"https://{host}/robots.txt")
             if resp.status_code in (401, 403):
                 log.warning("%s robots.txt answered %s — treating as disallow-all",
                             host, resp.status_code)
@@ -115,7 +131,8 @@ class PoliteFetcher:
             return None
         await self._wait_turn(host, rp)
         try:
-            resp = await self._http.get(url)
+            async with _REQUEST_SLOT:
+                resp = await self._http.get(url)
         except httpx.HTTPError as e:
             log.warning("request failed for %s: %s", url, e)
             self._note_failure(host, str(e)[:60])
@@ -127,7 +144,8 @@ class PoliteFetcher:
         if resp.status_code == 429:
             log.warning("%s rate-limited us (429) — backing off 60s once", host)
             await asyncio.sleep(60)
-            resp = await self._http.get(url)
+            async with _REQUEST_SLOT:
+                resp = await self._http.get(url)
             if resp.status_code != 200:
                 self._note_failure(host, "429")
                 return None
