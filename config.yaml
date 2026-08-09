@@ -15,7 +15,11 @@ profit:
   # of the two readings — StockX's help page does not say whether the minimum
   # covers processing too).
   min_transaction_fee_eur: 5.00
-  shipping_to_stockx_eur: 7.00    # flat label cost per unit, Estonia -> Eindhoven
+  # Corrected 2026-08-09 from a real payout. Sold into a EUR 102 bid: 9% tx
+  # (9.18) + 3% processing (3.06) leaves 89.76, and the actual payout was
+  # 79.76 — implying EUR 10.00 of shipping exactly, not 7.00. At a EUR 0 floor
+  # that 3.00 gap alone turned losses into apparent profits.
+  shipping_to_stockx_eur: 10.00   # flat label cost per unit, Estonia -> Eindhoven
   undercut_eur: 0.00              # list_ask scenario: undercut lowest ask by this much
 
 alias:
@@ -95,12 +99,12 @@ retailers:
     enabled: true
     scan_interval_minutes: 15
     request_delay_seconds: 2.5    # robots.txt asks Crawl-delay: 2; stay above it
-    # RUNNING PROMO (set 2026-07-28): extra 15% off at checkout, but only on
-    # items already marked down. Applied solely where the scraper reports
-    # on_sale, so full-price stock is never flattered. SET BACK TO 0.0 WHEN
-    # THE PROMO ENDS, or alerts will overstate profit on every sale item.
-    sale_discount_pct: 0.15
-    buy_note: "sale items take a further 15% at checkout"
+    # PROMO ENDED (confirmed 2026-08-09). While this was 0.15 every Ballzy
+    # sale item was priced 15% below what it actually costs — an Air Force 1
+    # at EUR 89 was being treated as EUR 75.65, which alerted as +EUR 7 profit
+    # when the real result was a EUR 9 LOSS. Set this back to 0.0 the day a
+    # promo ends.
+    sale_discount_pct: 0.0
     categories:
       # Sale sections FIRST: every product here is marked down, which is where
       # essentially all real spreads live. Verified 2026-08-06 — /en/men/sale
