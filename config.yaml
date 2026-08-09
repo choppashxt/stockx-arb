@@ -218,9 +218,14 @@ retailers:
     # so slug_filters is used as a BRAND ALLOWLIST and enumeration happens per
     # brand — nothing outside it ever costs a StockX resolution.
     enabled: true
-    scan_interval_minutes: 30
-    request_delay_seconds: 2.5
-    max_pages: 12                   # per brand, 50 products a page
+    # Backed off 2026-08-09: at 30min/2.5s/12pages this issued ~168 rapid
+    # GraphQL queries per scan (14 brands x 12 pages) and weekend.ee started
+    # answering 403 on every run — the circuit breaker then abandoned the whole
+    # scan, so we were getting ZERO products from them. They answer fine at a
+    # gentler rate, so the fix is to ask for less, not to route around it.
+    scan_interval_minutes: 60
+    request_delay_seconds: 5.0
+    max_pages: 6                    # per brand, 50 products a page
     slug_filters: [nike, jordan, adidas, new balance, asics, puma, saucony,
                    crocs, ugg, vans, converse, hoka, salomon, reebok]
 
