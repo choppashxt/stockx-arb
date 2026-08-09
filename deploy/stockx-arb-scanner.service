@@ -1,0 +1,35 @@
+[Unit]
+Description=stockx-arb scanner (retail -> StockX arbitrage alerts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arb
+WorkingDirectory=/opt/stockx-arb
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/opt/stockx-arb/.venv/bin/python -m arb scan
+
+# The Windows runner was a .bat loop that restarted the process if it exited.
+# systemd does that properly: always restart, but back off so a crash-loop
+# cannot hammer either StockX or the retailers.
+Restart=always
+RestartSec=60
+StartLimitIntervalSec=0
+
+# Journald captures stdout/stderr; no log files to rotate.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stockx-arb
+
+# Modest hardening. The process only needs to read its own directory, write
+# state.db, and make outbound HTTPS calls.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/stockx-arb
+
+[Install]
+WantedBy=multi-user.target

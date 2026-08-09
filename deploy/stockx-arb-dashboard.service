@@ -1,0 +1,35 @@
+[Unit]
+Description=stockx-arb dashboard (read-only, localhost only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arb
+WorkingDirectory=/opt/stockx-arb
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+
+# Deliberately bound to 127.0.0.1. The dashboard has NO authentication and
+# exposes your live opportunities and API budget — it must never listen on a
+# public interface. Reach it with an SSH tunnel instead:
+#   ssh -N -L 8787:127.0.0.1:8787 arb@<vps-ip>
+# then open http://127.0.0.1:8787 in your own browser.
+ExecStart=/opt/stockx-arb/.venv/bin/python -m arb dashboard --host 127.0.0.1 --port 8787
+
+Restart=always
+RestartSec=30
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stockx-arb-dash
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/stockx-arb
+
+[Install]
+WantedBy=multi-user.target
