@@ -40,7 +40,8 @@ class ScanStats:
 
 async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
                    resolver: CatalogResolver, provider: MarketDataProvider,
-                   notifier: Notifier, limit: Optional[int] = None) -> ScanStats:
+                   notifier: Notifier, limit: Optional[int] = None,
+                   force_fresh_all: bool = False) -> ScanStats:
     started_at = datetime.now(timezone.utc).isoformat()
     stats = ScanStats()
     # so the dashboard can tell "still scanning" from "hasn't run in ages"
@@ -92,7 +93,8 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
                 opportunities, used_market_call = await _evaluate_product(
                     product, cfg, db, resolver, provider, scraper,
                     allow_market_call=market_calls < cfg.stockx.market_calls_per_scan,
-                    force_fresh=(product.retailer, product.url) in changed)
+                    force_fresh=(force_fresh_all
+                                 or (product.retailer, product.url) in changed))
             except BudgetExhausted as e:
                 log.warning("stopping scan early: %s", e)
                 break

@@ -110,7 +110,8 @@ async def _cmd_scan(args) -> int:
                          [n for n, rc in cfg.retailers.items() if rc.enabled])
             for name in retailers:
                 await run_scan(name, cfg, db, resolver, provider, notifier,
-                               limit=args.limit)
+                               limit=args.limit,
+                               force_fresh_all=getattr(args, "force_fresh", False))
         else:
             await run_loop(cfg, db, resolver, provider, notifier,
                            retailer_filter=args.retailer)
@@ -594,6 +595,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="max candidates per scan (for testing)")
     p_scan.add_argument("--provider", choices=["official", "fixture"],
                         default="official")
+    p_scan.add_argument("--force-fresh", action="store_true",
+                        help="ignore the staleness tiers and re-fetch LIVE market "
+                             "data for every candidate. --backfill only lifts the "
+                             "per-scan caps; cached bids inside their TTL are still "
+                             "reused, so a backfill alone re-reads day-old prices")
     p_scan.add_argument("--backfill", action="store_true",
                         help="one-time full-catalog pass: resolve and price "
                              "EVERYTHING now (implies --once; ~1h for Ballzy, "

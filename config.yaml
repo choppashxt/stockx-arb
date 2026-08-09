@@ -38,7 +38,9 @@ vat:
   output_vat_on_sale: false       # do you owe VAT out of the StockX sale price?
 
 filters:
-  min_profit_eur: 10.0            # net profit that must be cleared
+  min_profit_eur: 0.0             # net profit that must be cleared
+                                  # (set to 0 on 2026-08-09: alert on ANY
+                                  # profit at all, however thin)
   require_live_bid: true          # profit is judged on the SELL NOW payout
                                   # (highest bid); items where only the
                                   # list-at-ask scenario is profitable stay quiet
