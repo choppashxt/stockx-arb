@@ -20,7 +20,8 @@ that only work if a listing eventually sells never alert.
 | Reede (reede.ee) | live | sale/category pages + sitemap rotation; US sizes + brand/gender from jsonConfig |
 | Teamsport (teamsport.ee) | live | category grid crawl; style codes in URLs; US sizes from jsonConfig |
 | Rademar (rademar.ee) | live | open JSON API; style code + EU sizes + per-size EANs; quantities check at alert time |
-| Sportland (.ee/.lv/.lt) | live | sitemap + storefront GraphQL; **size-level stock unverified** → one labeled product-level alert |
+| Sportland (.ee/.lt) | live | sitemap + storefront GraphQL; variant join provides verified per-size stock, conservative unknown fallback (.lv intentionally disabled) |
+| Weekend.ee | disabled | plain request works standalone but shared scans receive a Cloudflare challenge; disabled rather than evaded |
 | SportsDirect (.ee) | skipped | drops non-browser connections (Frasers bot wall) |
 | Sneakersnstuff | live | Shopify JSON-LD: per-size US sizes, prices, stock, **GTINs**; 10s crawl-delay honored |
 | Footshop (.eu) | live | microdata (style code/price/stock); size-level stock client-side only → labeled product-level alerts |
@@ -75,6 +76,9 @@ python -m arb scan --once                    # one pass, alerts to Discord
 python -m arb scan                           # continuous loop (per-retailer intervals)
 python -m arb resolve DZ5485-612 --market    # debug one style code against StockX
 python -m arb status                         # DB, budget, recent scans
+python -m arb report                         # re-check recorded opportunities live
+python -m arb review --limit 25              # inspect conservative review rows
+python -m arb review --resolve 123            # close one manually checked row
 ```
 
 `--provider fixture` runs the real retailer scrape against canned StockX data
@@ -95,9 +99,10 @@ Fixture runs use a separate `state-fixture.db` so they never pollute real state.
    price, stop here (no product-page fetch, no per-size work).
 5. **Confirm** on the retailer product page: authoritative price, per-size
    stock, and the retailer's own EU↔US size mapping.
-6. **Match sizes** — retail US size must equal the StockX variant size, and the
-   EU label must not contradict StockX's own size-chart conversion. Anything
-   ambiguous goes to the `review_queue` table instead of alerting.
+6. **Match sizes** — the retailer's declared size system is respected: a US
+   display label is compared only with StockX US, while an EU label is checked
+   against StockX's EU conversion. Anything ambiguous goes to the
+   `review_queue` table instead of alerting.
 7. **Profit** both ways: `sell_now` (into the highest bid) and `list_ask`
    (at/under the lowest ask). Fees, shipping, and the (default-off) VAT wedge
    come from config.

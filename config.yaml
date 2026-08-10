@@ -123,7 +123,11 @@ retailers:
       - /soodus                   # sale â€” where the money is
       - /mehed
       - /naised
-    sitemap_slice_per_scan: 400   # backlog product pages revisited per scan
+    # 400 product-page requests made a nominal 15-minute scan take 30-40
+    # minutes and intermittently trigger a Cloudflare challenge after the
+    # fresh categories had succeeded. Keep fresh pages every cycle and rotate
+    # a smaller backlog slice; this is less traffic and a faster real cadence.
+    sitemap_slice_per_scan: 100
     # Brand list is evidence-based (see BRAND-EVIDENCE note in README): kept are
     # brands whose best observed live bid actually exceeded retail. Dropped
     # asics/salomon/converse/hoka/saucony â€” their best case bid still sat below
@@ -223,12 +227,17 @@ retailers:
     # ~47,900 products, the large majority from brands StockX does not trade,
     # so slug_filters is used as a BRAND ALLOWLIST and enumeration happens per
     # brand — nothing outside it ever costs a StockX resolution.
-    enabled: true
-    # Backed off 2026-08-09: at 30min/2.5s/12pages this issued ~168 rapid
-    # GraphQL queries per scan (14 brands x 12 pages) and weekend.ee started
-    # answering 403 on every run — the circuit breaker then abandoned the whole
-    # scan, so we were getting ZERO products from them. They answer fine at a
-    # gentler rate, so the fix is to ask for less, not to route around it.
+    # DISABLED 2026-08-10 after live verification. The exact honest GraphQL
+    # request returns 200 standalone, but the shared scanner receives a
+    # Cloudflare challenge every cycle. Caps of 2 and 1 plus a process-wide
+    # 1s gap and a dedicated 5s quiet window all failed. Browser/TLS/proxy
+    # workarounds would violate the no-anti-detection rule, so this source
+    # stays disabled unless Weekend opens stable plain-client access.
+    enabled: false
+    # Before disabling it, the scan was also reduced from ~168 GraphQL queries
+    # (14 brands x 12 pages) to this gentler profile. That reduction did not
+    # remove the challenge in the shared process; the settings are retained
+    # for a future sanctioned re-test if plain-client access becomes stable.
     scan_interval_minutes: 60
     request_delay_seconds: 5.0
     max_pages: 6                    # per brand, 50 products a page

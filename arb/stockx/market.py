@@ -72,33 +72,6 @@ class StockXOfficialProvider(MarketDataProvider):
         return out
 
 
-class CachedProvider(MarketDataProvider):
-    """Wraps another provider with the SQLite snapshot cache so repeated scans
-    inside market_refresh_minutes cost zero API requests."""
-
-    def __init__(self, inner: MarketDataProvider, db: Database, cfg: StockXConfig,
-                 variant_ids_by_product: Optional[dict[str, list[str]]] = None):
-        self.inner = inner
-        self.db = db
-        self.cfg = cfg
-        self._known_variants = variant_ids_by_product or {}
-
-    def register_variants(self, product_id: str, variant_ids: list[str]) -> None:
-        self._known_variants[product_id] = variant_ids
-
-    async def get_market_data(self, product_id: str) -> dict[str, MarketData]:
-        variant_ids = self._known_variants.get(product_id, [])
-        if variant_ids:
-            cached = {
-                vid: md for vid in variant_ids
-                if (md := self.db.get_market_snapshot(
-                    vid, self.cfg.market_refresh_minutes)) is not None
-            }
-            if len(cached) == len(variant_ids):
-                return cached
-        return await self.inner.get_market_data(product_id)
-
-
 class FixtureProvider(MarketDataProvider):
     """Offline provider for --provider fixture: serves canned market data so the
     whole pipeline can run without StockX credentials (see arb/fixtures.py)."""

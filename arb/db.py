@@ -363,6 +363,36 @@ class Database:
             (_now(), retailer, url, style_code, reason, json.dumps(detail, default=str)))
         self.conn.commit()
 
+    def list_reviews(self, *, limit: int = 50, reason: Optional[str] = None,
+                     retailer: Optional[str] = None,
+                     resolved: bool = False) -> list:
+        """Newest review rows, optionally narrowed for manual triage."""
+        clauses = ["resolved=?"]
+        params: list[object] = [int(resolved)]
+        if reason:
+            clauses.append("reason=?")
+            params.append(reason)
+        if retailer:
+            clauses.append("retailer=?")
+            params.append(retailer)
+        params.append(max(1, limit))
+        return self.conn.execute(
+            "SELECT * FROM review_queue WHERE " + " AND ".join(clauses)
+            + " ORDER BY id DESC LIMIT ?", params).fetchall()
+
+    def resolve_review(self, review_id: int) -> bool:
+        """Mark one manually inspected row resolved; return whether it existed."""
+        cur = self.conn.execute(
+            "UPDATE review_queue SET resolved=1 WHERE id=? AND resolved=0",
+            (review_id,))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def review_reason_counts(self) -> list:
+        return self.conn.execute(
+            """SELECT reason, COUNT(*) AS n FROM review_queue
+               WHERE resolved=0 GROUP BY reason ORDER BY n DESC, reason""").fetchall()
+
     # -- api budget ----------------------------------------------------------
     def record_api_request(self) -> None:
         self.conn.execute("INSERT INTO api_requests VALUES (?)", (_now(),))

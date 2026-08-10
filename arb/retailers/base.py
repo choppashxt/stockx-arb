@@ -138,7 +138,11 @@ class PoliteFetcher:
             self._note_failure(host, str(e)[:60])
             return None
         if resp.status_code == 403:
-            log.warning("%s returned 403 — not retrying this run", host)
+            body = resp.text[:2000].lower()
+            challenge = "just a moment" in body or "cf-chl" in body
+            log.warning("%s returned 403 (cloudflare_challenge=%s, cf_ray=%s) "
+                        "— not retrying this run", host, challenge,
+                        resp.headers.get("cf-ray", "none"))
             self._given_up.add(host)
             return None
         if resp.status_code == 429:

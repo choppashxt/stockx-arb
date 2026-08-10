@@ -23,7 +23,8 @@ is no code path anywhere that places an order.
 
 ```
 arb/
-  cli.py            entry point: scan / auth / selftest / resolve / status / report / dashboard
+  cli.py            entry point: scan / auth / selftest / resolve / status /
+                     report / review / watch / sold / dashboard
   config.py         AppConfig (config.yaml) + Secrets (.env), both pydantic
   models.py         Product, RetailSize, StockXProduct, StockXVariant,
                      MarketData, ProfitBreakdown, Opportunity — everything
@@ -46,8 +47,8 @@ arb/
     catalog.py      CatalogResolver — retail code/barcode -> StockX product,
                      with an on-disk cache and cache self-healing (see §7)
     market.py       MarketDataProvider interface: StockXOfficialProvider
-                     (live), CachedProvider (wraps another with the snapshot
-                     cache), FixtureProvider (offline/selftest)
+                     (live), FixtureProvider (offline/selftest); dynamic
+                     snapshot caching lives in scanner.py
 
   retailers/
     base.py         RetailerScraper ABC + PoliteFetcher (robots.txt, per-host
@@ -58,7 +59,7 @@ arb/
     overkill.py, footshop.py, weekend.py, apollo.py, klick.py
                      one module per retailer, see §5
 
-tests/              126+ pytest tests, no network, run in ~2s
+tests/              147 pytest tests, no network, run in ~2s
 docs/
   AUDIT-2026-07-28.md      full audit: findings, severity, fixes, roadmap
   EXPANSION-PLAN.md        non-sneaker category research + corrected phasing
@@ -183,8 +184,8 @@ bot walls. Sites that block plain clients are simply left out.
 | `reede` | category grid | |
 | `teamsport` | category grid | registered-customer discount modeled via `discount_pct` |
 | `rademar` | category grid | |
-| `sportland` / `sportland_lt` / `sportland_lv` | Magento GraphQL over `GET ?query=` | `size_stock_unverified=True` — sizes listed, per-size stock NOT exposed by the API (all sizes carry the parent's stock flag; treated as unknown, never fabricated true) |
-| `weekend` | Magento GraphQL over `GET ?query=` | **real per-size stock** (each variant has its own `stock_status`); SKU has a 2-letter brand prefix over the manufacturer code (`NIDM0113-100` -> `DM0113-100`); brand-gated via `slug_filters` (StockX-carried brands only) because ~91% of the catalog is brands StockX doesn't trade |
+| `sportland` / `sportland_lt` | Magento GraphQL over `GET ?query=` | child-variant `footwear_size` joins provide verified per-size stock; unresolved joins fall back to unknown rather than guessed stock (`sportland_lv` is intentionally disabled) |
+| `weekend` | Magento GraphQL over `GET ?query=` | **disabled**: exact honest requests return 200 standalone but receive a Cloudflare challenge in the shared scanner even after conservative concurrency/quiet-window experiments; no evasion attempted |
 | `sns` | Shopify, ld+json + GTINs | |
 | `overkill` | Shopify | ships to EE, `extra_cost_eur` models the forwarding cost |
 | `footshop` | microdata | `size_stock_unverified=True` |
@@ -223,9 +224,8 @@ Retailers not integrated, with the evidence for why:
   project.
 - **`market.py`**: `MarketDataProvider` interface. `StockXOfficialProvider` is
   the live one (one API call = every variant of a product). `FixtureProvider`
-  backs `selftest`. `CachedProvider` exists but is presently unused by the
-  main pipeline (the snapshot cache is consulted directly in `scanner.py`
-  instead).
+  backs `selftest`. Dynamic snapshot caching stays in `scanner.py`, where the
+  hot/warm/cold TTL and mandatory live confirmation can be applied together.
 
 **Tiered re-check budget** (`_market_ttl_minutes` in `scanner.py`, driven by
 `sku_watch` table): a product that already clears the profit floor, or is
@@ -334,14 +334,6 @@ every alert as a link to check by hand.
 
 ## 9. What's NOT implemented (known gaps)
 
-- **`arb review`** — the review queue (`review_queue` table, written by
-  `db.add_review()` in many places) has no reader. Hundreds of rows
-  accumulate and nothing surfaces them. This blocks trading-card retailers,
-  whose matching would depend entirely on this queue.
-- **`arb report`'s API accounting** — it builds `Database(":memory:")`
-  internally, so its own StockX requests aren't counted against the daily
-  budget (pacing via `CrossProcessThrottle` is still correct; only the
-  accounting is not).
 - **Per-category fee differentiation** — deliberately NOT built. Fee lookup
   confirmed StockX charges identically across sneakers/streetwear/
   collectibles/electronics, so this was correctly descoped rather than left
@@ -349,8 +341,10 @@ every alert as a link to check by hand.
 - **GOAT/Alias live market data** — no legitimate path found yet; needs GOAT
   to issue real API credentials (an email requesting this is drafted/sent;
   outcome pending as of this writing).
-- **File ACLs** — `.env` and `state.db` were never had their inherited
-  Windows ACLs tightened on the original deployment machine.
+- **Review decisions do not create matching rules automatically.** `arb review`
+  now lists, filters and closes rows, but promoting a reviewed match still
+  requires an explicit code/data rule so low-confidence items never alert by
+  accident.
 
 `docs/AUDIT-2026-07-28.md` has the full original findings list (most Phase-0
 items from it are now fixed; check git log for which). `docs/EXPANSION-PLAN.md`

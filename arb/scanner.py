@@ -332,7 +332,7 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
                     continue
 
         if variant is None:
-            variant, size_conf = _match_variant(size.us_size, size.label, variants)
+            variant, size_conf = _match_retail_size(size, variants)
         if variant is None or size_conf < 1.0:
             if variant is not None and 0 < size_conf < 1.0:
                 db.add_review(product.retailer, product.url, product.style_code,
@@ -435,6 +435,23 @@ def _match_variant(us_size: Optional[str], eu_label: Optional[str], variants):
     if len(full_matches) > 1:
         return full_matches[0], 0.5
     return best, best_conf
+
+
+def _match_retail_size(size, variants):
+    """Map a normalized RetailSize without confusing its sizing system.
+
+    SNS and Teamsport publish US labels. Passing their display label into the
+    EU slot as well made a correct US match contradict StockX's EU conversion,
+    downgrading every result to review-only confidence 0.5. Letter sizes use
+    StockX's primary variant label; UK/unknown labels require an explicit,
+    retailer-provided US conversion rather than a guess.
+    """
+    system = (size.system or "").strip().upper()
+    retail_us = size.us_size
+    retail_eu = size.label if system == "EU" else None
+    if system in {"US", "LETTER"}:
+        retail_us = retail_us or size.label
+    return _match_variant(retail_us, retail_eu, variants)
 
 
 def _build_opportunity(product: Product, size_label: Optional[str],

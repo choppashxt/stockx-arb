@@ -283,10 +283,13 @@ async def _cmd_report(args) -> int:
         ro.close()
         return 0
 
-    # provider caches into a scratch DB so we never contend for the write lock
-    scratch = Database(":memory:")
-    client = StockXClient(TokenManager(secrets, scratch), scratch, cfg.stockx)
-    provider = StockXOfficialProvider(client, scratch, cfg.stockx)
+    # Report calls consume the same official API quota as scanner calls. Use
+    # the configured DB so budget accounting remains global and the refreshed
+    # snapshots benefit the scanner too. WAL keeps the read-only connection
+    # above concurrent with these short writes.
+    api_db = Database(cfg.db_file)
+    client = StockXClient(TokenManager(secrets, api_db), api_db, cfg.stockx)
+    provider = StockXOfficialProvider(client, api_db, cfg.stockx)
     live, gone = [], []
     try:
         for r in rows:
@@ -325,7 +328,7 @@ async def _cmd_report(args) -> int:
             live.append((profit, o, cur["price"], md, size_ok))
     finally:
         await client.close()
-        scratch.close()
+        api_db.close()
 
     print(f"=== LIVE SELL-NOW OPPORTUNITIES: {len(live)} "
           f"(verified against live bids just now) ===")
@@ -352,6 +355,46 @@ async def _cmd_report(args) -> int:
         print(f"\nreview queue: {open_reviews} open items")
     ro.close()
     return 0
+
+
+async def _cmd_review(args) -> int:
+    """Read and manually close conservative match/size review entries."""
+    import json as _json
+
+    cfg = load_config(args.config)
+    db = Database(cfg.db_file)
+    try:
+        if args.resolve is not None:
+            if db.resolve_review(args.resolve):
+                print(f"review {args.resolve} resolved")
+                return 0
+            print(f"open review {args.resolve} not found")
+            return 1
+
+        rows = db.list_reviews(limit=args.limit, reason=args.reason,
+                               retailer=args.retailer,
+                               resolved=args.resolved)
+        if not args.resolved:
+            counts = db.review_reason_counts()
+            total = sum(r["n"] for r in counts)
+            summary = ", ".join(f"{r['reason']}={r['n']}" for r in counts)
+            print(f"open reviews: {total}" + (f" ({summary})" if summary else ""))
+        print(f"showing {len(rows)} {'resolved' if args.resolved else 'open'} rows")
+        for row in rows:
+            try:
+                detail = _json.loads(row["detail_json"] or "{}")
+                detail_text = _json.dumps(detail, ensure_ascii=False,
+                                          separators=(",", ":"))
+            except (TypeError, ValueError):
+                detail_text = str(row["detail_json"] or "")
+            print(f"\n#{row['id']}  {row['created_at'][:19]}  "
+                  f"{row['retailer']}  {row['reason']}")
+            print(f"  style: {row['style_code'] or '—'}")
+            print(f"  detail: {detail_text[:500]}")
+            print(f"  {row['url']}")
+        return 0
+    finally:
+        db.close()
 
 
 def _print_stored(rows, ro, limit: int) -> None:
@@ -636,6 +679,17 @@ def main(argv: list[str] | None = None) -> int:
     p_report.add_argument("--no-verify", action="store_true",
                           help="print stored history without re-checking StockX")
     p_report.set_defaults(func=_cmd_report)
+
+    p_review = sub.add_parser(
+        "review", help="inspect conservative match/size review-queue entries")
+    p_review.add_argument("--limit", type=int, default=25)
+    p_review.add_argument("--reason", default=None)
+    p_review.add_argument("--retailer", default=None)
+    p_review.add_argument("--resolved", action="store_true",
+                          help="show closed rows instead of open rows")
+    p_review.add_argument("--resolve", type=int, default=None, metavar="ID",
+                          help="mark one manually inspected open row resolved")
+    p_review.set_defaults(func=_cmd_review)
 
     p_watch = sub.add_parser(
         "watch", help="watch the live bid on ONE variant you already own "

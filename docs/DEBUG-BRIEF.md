@@ -3,6 +3,40 @@
 Self-contained brief for an agent picking this up cold. Assumes no prior
 conversation. Read `docs/STRUCTURE.md` first for architecture.
 
+## Resolution — 2026-08-10
+
+- **Issue 1:** the process-wide cap of 2 was loaded and live-tested; Weekend
+  still returned the same Cloudflare challenge. A cap of 1, a one-second
+  global gap, and a dedicated five-second quiet window also failed, while the
+  exact `WeekendScraper` path continued to return products standalone. Those
+  experiments only reduced volume—no identity/TLS/browser/proxy workaround
+  was attempted. `weekend.enabled` is now `false`. Reede remains enabled with
+  its rotation reduced from 400 to 100 pages. A production shared-process pass
+  from 22:06:10 to 22:18:01 completed 70 fresh + 100 rotating pages as 71
+  products / 44 candidates, with no 403, no failure, and no opportunity. The
+  loop sleeps for the configured 15 minutes *after* that roughly 12-minute
+  crawl, so its present start-to-start cadence is about 27 minutes; reaching a
+  literal 15-minute cadence would require scheduler/coverage redesign rather
+  than more aggressive requests. Safe 403 logs now identify Cloudflare
+  challenges and include the request ray ID.
+- **Issue 2:** the market is thin, but the pipeline also had a real broken
+  gate. `_evaluate_product` passed every display label as EU even when
+  `RetailSize.system == "US"`; correct US matches were downgraded to 0.5 and
+  rejected. The pipeline now routes US/EU/letter labels by their declared
+  system, with regression tests. Evidence trace: Salomon `L49229300` had a
+  +EUR121.68 product-level maximum only on out-of-stock US 7, so it was
+  correctly withheld. Sportland `DD1579-402` was live-verified end to end:
+  EU 47.5 in stock at EUR59.99, EUR83 bid, EUR63.04 payout, EUR3.05 profit;
+  it had already alerted and later scans correctly deduplicated it. Two SNS
+  products also traversed the corrected US-size/barcode path successfully.
+- **Issue 3:** `arb report` now records requests in the configured database;
+  `arb review` lists/filters/closes queue rows; the unused `CachedProvider`
+  was removed because scanner-level dynamic TTL logic is authoritative; and
+  `.env`, `state.db`, plus active WAL/SHM files were restricted locally to the
+  owner, SYSTEM and Administrators.
+- Verification after each production change: `selftest OK`; final suite is
+  **147 passed**.
+
 ---
 
 ## What this project is
