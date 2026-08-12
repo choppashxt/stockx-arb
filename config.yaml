@@ -74,10 +74,22 @@ stockx:
   # market-data call covers a whole product, and refreshing all ~3000 matched
   # products every 15 min would need 284 000 calls/day against a 23 500 budget.
   # So near-misses are watched closely and hopeless ones checked once a day.
-  refresh_minutes_hot: 45         # profitable now, or within a whisker
-  refresh_minutes_warm: 240       # within near_miss_eur of the floor
-  refresh_minutes_cold: 1440      # bid nowhere near retail
-  near_miss_eur: 30.0
+  # Tightened 2026-08-12. The previous 45/240/1440 + near_miss 30 put 95% of
+  # watched products in the cold tier, capping the WHOLE pipeline at ~6,700
+  # market calls/day — 29% of budget. Even at perfect 24/7 uptime it was
+  # physically impossible to use the API we pay nothing extra for, and
+  # overnight throughput measured ~75 requests/hour.
+  #
+  # Cold does NOT mean hopeless: the one completed profitable trade (Air Max
+  # Pulse) went from NO BID AT ALL to a EUR 176 bid and back inside ~23 hours.
+  # At 1440-minute granularity such a spike is seen once, if at all.
+  #
+  # Projected: ~21,100 calls/day theoretical, ~14,400 realistic against the
+  # 23,500 budget. daily_request_budget still hard-stops a scan if exceeded.
+  refresh_minutes_hot: 30         # profitable now, or within a whisker
+  refresh_minutes_warm: 120       # within near_miss_eur of the floor
+  refresh_minutes_cold: 480       # bid nowhere near retail — still 3x/day
+  near_miss_eur: 60.0             # widened: moves 491 products cold -> warm
   # Full-sweep settings: the real limiter is daily_request_budget above (StockX
   # allows 1 req/s), so these are deliberately high â€” every cycle grinds through
   # as much of the catalog as the budget allows, and resolutions cache forever.
