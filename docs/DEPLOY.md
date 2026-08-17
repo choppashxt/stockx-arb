@@ -118,14 +118,16 @@ From Windows (PowerShell), with the local scanner **stopped** so the file is
 not mid-write:
 
 ```powershell
-scp "C:\Users\ADMIN\Documents\Cs2 arbitrage\stockx-arb\state.db" root@<vps-ip>:/tmp/state.db
+scp "C:\Users\ADMIN\Documents\Cs2 arbitrage\stockx-arb\state.db" root@<vps-ip>:/root/state.db
 ```
 
-It goes to `root@` and via `/tmp` because `arb` has no login shell (step 2).
-Then on the VPS:
+It goes to `root@` because `arb` has no login shell (step 2), and it stages in
+`/root` — mode 700 — rather than `/tmp`, which is world-readable to every
+account on the box. `state.db` carries your live StockX tokens, so it must not
+sit in a public directory even for a moment. Then on the VPS:
 
 ```bash
-mv /tmp/state.db /opt/stockx-arb/state.db
+mv /root/state.db /opt/stockx-arb/state.db
 chown arb:arb /opt/stockx-arb/state.db
 chmod 600 /opt/stockx-arb/state.db
 ```
