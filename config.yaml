@@ -84,11 +84,25 @@ stockx:
   # Pulse) went from NO BID AT ALL to a EUR 176 bid and back inside ~23 hours.
   # At 1440-minute granularity such a spike is seen once, if at all.
   #
-  # Projected: ~21,100 calls/day theoretical, ~14,400 realistic against the
-  # 23,500 budget. daily_request_budget still hard-stops a scan if exceeded.
-  refresh_minutes_hot: 30         # profitable now, or within a whisker
-  refresh_minutes_warm: 120       # within near_miss_eur of the floor
-  refresh_minutes_cold: 480       # bid nowhere near retail — still 3x/day
+  # Backed off 2026-08-17 after measurement. 30/120/480 was projected at
+  # "~14,400 realistic" by discounting the theoretical 21,100 to 68% — but that
+  # 68% was measured on a machine that was powered off half the time, so it was
+  # a downtime artifact, not tier efficiency. Applying it to a config whose
+  # whole purpose was to fix downtime-limited throughput was circular.
+  #
+  # Measured on the first full day of real uptime: 17,071 requests between
+  # 09:30 and 20:39 — 73% of budget in 11 hours, tracking ~25,500/day against a
+  # 23,500 ceiling. The budget is a ROLLING 24h window, so nothing frees up
+  # until the oldest requests age out; the scanner would have hard-stopped
+  # overnight (client.py raises once the budget is reached) and priced nothing
+  # until morning. Blind is worse than slow.
+  #
+  # Theoretical here is 14,454/day = 62%. The headroom is deliberate: the
+  # projection models market refreshes only, while catalog search/variant
+  # resolution calls draw on the same budget.
+  refresh_minutes_hot: 45         # profitable now, or within a whisker
+  refresh_minutes_warm: 180       # within near_miss_eur of the floor
+  refresh_minutes_cold: 720       # bid nowhere near retail — still 2x/day
   near_miss_eur: 60.0             # widened: moves 491 products cold -> warm
   # Full-sweep settings: the real limiter is daily_request_budget above (StockX
   # allows 1 req/s), so these are deliberately high â€” every cycle grinds through
