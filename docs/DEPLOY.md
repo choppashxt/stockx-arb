@@ -35,7 +35,9 @@ Estonian and Nordic shops; an EU IP is geographically honest, lower latency,
 and less likely to trip the geo/bot heuristics that already cost us weekend.ee
 for a day. Avoid US datacentres for this.
 
-Debian 12 or Ubuntu 24.04.
+Debian 12/13 or Ubuntu 24.04. (Debian 13 "trixie" ships Python 3.13 and
+enforces PEP 668 — you cannot `pip install` into the system Python. Everything
+below installs into a venv, so that restriction never comes up.)
 
 ---
 
@@ -48,18 +50,31 @@ apt update && apt install -y python3 python3-venv python3-pip git
 adduser --system --group --home /opt/stockx-arb arb
 ```
 
+`arb` is a **system account with no login shell**. That is deliberate — nothing
+should be able to SSH in as the account holding your API credentials. It also
+means you cannot `ssh arb@` or `scp ... arb@`; do those as `root` and hand the
+file over afterwards. Steps 5 and 8 below already do it that way.
+
 ## 3. Get the code
 
 ```bash
 cd /opt
 git clone https://github.com/choppashxt/stockx-arb.git stockx-arb-src
-cp -r stockx-arb-src/. /opt/stockx-arb/
+cp -a stockx-arb-src/. /opt/stockx-arb/
 rm -rf stockx-arb-src
+chown -R arb:arb /opt/stockx-arb
 cd /opt/stockx-arb
 
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+sudo -u arb python3 -m venv .venv
+sudo -u arb .venv/bin/pip install -r requirements.txt
 ```
+
+The `chown -R` is not cosmetic. Cloning as root leaves the whole tree
+root-owned, and the service runs as `arb` — which then cannot create
+`state.db-wal`, `state.db-shm`, or the `.stockx_ratelimit` lease file, because
+SQLite and the lease need write permission on the *directory*, not just the
+file. Git would also refuse a later `sudo -u arb git pull` with a "dubious
+ownership" error. Build the venv as `arb` for the same reason.
 
 `truststore` is in requirements and is harmless here — it exists for the
 TLS-intercepting antivirus on the Windows machine and is a no-op on a clean
@@ -103,15 +118,21 @@ From Windows (PowerShell), with the local scanner **stopped** so the file is
 not mid-write:
 
 ```powershell
-scp "C:\Users\ADMIN\Documents\Cs2 arbitrage\stockx-arb\state.db" arb@<vps-ip>:/opt/stockx-arb/state.db
+scp "C:\Users\ADMIN\Documents\Cs2 arbitrage\stockx-arb\state.db" root@<vps-ip>:/tmp/state.db
 ```
 
+It goes to `root@` and via `/tmp` because `arb` has no login shell (step 2).
 Then on the VPS:
 
 ```bash
+mv /tmp/state.db /opt/stockx-arb/state.db
 chown arb:arb /opt/stockx-arb/state.db
 chmod 600 /opt/stockx-arb/state.db
 ```
+
+Copy `state.db` only — **not** `state.db-wal` or `state.db-shm`. With the local
+scanner stopped, SQLite has checkpointed everything into the main file; moving
+a stale WAL alongside it is how you corrupt the database.
 
 **Treat `state.db` as a secret.** Its `kv` table caches your live StockX access
 and refresh tokens. Don't put it anywhere shared.
@@ -140,8 +161,13 @@ Check it:
 
 ```bash
 systemctl status stockx-arb-scanner
-journalctl -u stockx-arb -f          # live log, Ctrl-C to detach
+journalctl -u stockx-arb-scanner -f   # live log, Ctrl-C to detach
+journalctl -t stockx-arb -f           # same, by SyslogIdentifier
 ```
+
+Note the unit is `stockx-arb-scanner`, not `stockx-arb`. `journalctl -u
+stockx-arb` matches a unit that does not exist and prints nothing — which reads
+exactly like a dead scanner.
 
 `Restart=always` with `RestartSec=60` replaces the `.bat` loop, and services
 start on boot — so a VPS reboot brings everything back without you.
@@ -152,7 +178,7 @@ The dashboard has **no authentication** and shows your live opportunities and
 API budget, so it binds to `127.0.0.1` only. Tunnel to it:
 
 ```bash
-ssh -N -L 8787:127.0.0.1:8787 arb@<vps-ip>
+ssh -N -L 8787:127.0.0.1:8787 root@<vps-ip>
 ```
 
 Then open `http://127.0.0.1:8787` in your own browser. Do not "fix" this by
@@ -163,9 +189,9 @@ binding `0.0.0.0`.
 ## Day-to-day
 
 ```bash
-journalctl -u stockx-arb -f                       # watch it work
-journalctl -u stockx-arb --since "1 hour ago"     # recent activity
-systemctl restart stockx-arb-scanner              # after a config change
+journalctl -t stockx-arb -f                          # watch it work
+journalctl -t stockx-arb --since "1 hour ago"        # recent activity
+systemctl restart stockx-arb-scanner                 # after a config change
 sudo -u arb /opt/stockx-arb/.venv/bin/python -m arb report    # live opportunities
 ```
 
