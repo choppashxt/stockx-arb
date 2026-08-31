@@ -253,17 +253,21 @@ retailers:
     # ~47,900 products, the large majority from brands StockX does not trade,
     # so slug_filters is used as a BRAND ALLOWLIST and enumeration happens per
     # brand — nothing outside it ever costs a StockX resolution.
-    # DISABLED 2026-08-10 after live verification. The exact honest GraphQL
-    # request returns 200 standalone, but the shared scanner receives a
-    # Cloudflare challenge every cycle. Caps of 2 and 1 plus a process-wide
-    # 1s gap and a dedicated 5s quiet window all failed. Browser/TLS/proxy
-    # workarounds would violate the no-anti-detection rule, so this source
-    # stays disabled unless Weekend opens stable plain-client access.
-    enabled: false
-    # Before disabling it, the scan was also reduced from ~168 GraphQL queries
-    # (14 brands x 12 pages) to this gentler profile. That reduction did not
-    # remove the challenge in the shared process; the settings are retained
-    # for a future sanctioned re-test if plain-client access becomes stable.
+    # DISABLED 2026-08-10 on the Windows machine: the exact honest GraphQL
+    # request returned 200 standalone but the shared scanner got a Cloudflare
+    # challenge every cycle. Caps of 2 and 1 plus a 1s process gap all failed
+    # to clear it there.
+    # RE-ENABLED 2026-08-31 after moving to the VPS. The identical single
+    # request (robots.txt + one GraphQL query, same honest UA, no retries)
+    # returns 200 from the VPS IP. Consistent with Cloudflare scoring bot
+    # reputation per IP across its whole network (see base.py) rather than
+    # this request pattern specifically — a fresh, unflagged EU IP clears it
+    # where the old one didn't. No UA/TLS/proxy change was made; if this
+    # regresses, disable again rather than adding evasion.
+    enabled: true
+    # Kept at the gentler profile from the 2026-08-10 backoff rather than
+    # restoring the original ~168-query scan — no need to push harder than
+    # this until there's a reason to.
     scan_interval_minutes: 60
     request_delay_seconds: 5.0
     max_pages: 6                    # per brand, 50 products a page
