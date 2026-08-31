@@ -13,7 +13,7 @@ Environment=PYTHONIOENCODING=utf-8
 # Deliberately bound to 127.0.0.1. The dashboard has NO authentication and
 # exposes your live opportunities and API budget — it must never listen on a
 # public interface. Reach it with an SSH tunnel instead:
-#   ssh -N -L 8787:127.0.0.1:8787 arb@<vps-ip>
+#   ssh -N -L 8787:127.0.0.1:8787 debian@<vps-ip>   (arb has no login shell)
 # then open http://127.0.0.1:8787 in your own browser.
 ExecStart=/opt/stockx-arb/.venv/bin/python -m arb dashboard --host 127.0.0.1 --port 8787
 

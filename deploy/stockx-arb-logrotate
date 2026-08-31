@@ -1,0 +1,19 @@
+# journald already rotates its own store, but the scanner ALSO writes
+# scanner.log / scanner.err.log directly (deploy/stockx-arb-scanner.service),
+# because that's what the dashboard's Live Log panel reads. Those files are
+# plain appends with nothing else to cap them — on Windows scanner.log grew
+# to ~22MB in about a week with no rotation. Install this so it doesn't grow
+# unbounded on a VPS with a small disk:
+#
+#   sudo cp deploy/stockx-arb-logrotate /etc/logrotate.d/stockx-arb
+#
+# No service restart/reload needed: logrotate's copytruncate leaves the fd
+# systemd is writing to in place, it just empties it after copying.
+/opt/stockx-arb/scanner.log /opt/stockx-arb/scanner.err.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

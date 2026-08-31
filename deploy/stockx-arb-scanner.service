@@ -9,7 +9,17 @@ User=arb
 WorkingDirectory=/opt/stockx-arb
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONIOENCODING=utf-8
-ExecStart=/opt/stockx-arb/.venv/bin/python -m arb scan
+
+# bash -c + process substitution so output lands in BOTH places at once:
+# journald (via the normal stdout/stderr fds, still captured below) and
+# scanner.log / scanner.err.log (which the dashboard's "Live log" panel
+# reads — see arb/dashboard.py:_tail). A plain ExecStart with StandardOutput
+# redirected to a file loses journald; this keeps both without picking one.
+# Needs /bin/bash specifically — Debian's /bin/sh (dash) has no process
+# substitution.
+ExecStart=/bin/bash -c 'exec /opt/stockx-arb/.venv/bin/python -u -m arb scan \
+  > >(tee -a /opt/stockx-arb/scanner.log) \
+  2> >(tee -a /opt/stockx-arb/scanner.err.log >&2)'
 
 # The Windows runner was a .bat loop that restarted the process if it exited.
 # systemd does that properly: always restart, but back off so a crash-loop
@@ -18,7 +28,6 @@ Restart=always
 RestartSec=60
 StartLimitIntervalSec=0
 
-# Journald captures stdout/stderr; no log files to rotate.
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=stockx-arb

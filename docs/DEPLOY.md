@@ -45,15 +45,27 @@ below installs into a venv, so that restriction never comes up.)
 
 ```bash
 ssh root@<vps-ip>
+```
 
+Many providers' Debian cloud images (Zone.ee's included) disable **direct
+root SSH login** and instead provision a sudo-capable non-root account —
+often called `debian` or `admin` — with your public key already installed.
+If `ssh root@<vps-ip>` is refused with "Permission denied (publickey)" even
+though the key is correctly added, that's why: try `ssh debian@<vps-ip>` (or
+`admin@`) instead, and prefix root-level commands with `sudo`. Everything
+below shows the plain-root form; on the sudo-user path just prepend `sudo`
+to each command run on the VPS.
+
+```bash
 apt update && apt install -y python3 python3-venv python3-pip git
 adduser --system --group --home /opt/stockx-arb arb
 ```
 
 `arb` is a **system account with no login shell**. That is deliberate — nothing
 should be able to SSH in as the account holding your API credentials. It also
-means you cannot `ssh arb@` or `scp ... arb@`; do those as `root` and hand the
-file over afterwards. Steps 5 and 8 below already do it that way.
+means you cannot `ssh arb@` or `scp ... arb@`; do those as `root` (or your
+sudo user) and hand the file over afterwards. Steps 5 and 8 below already do
+it that way.
 
 ## 3. Get the code
 
@@ -121,15 +133,19 @@ not mid-write:
 scp "C:\Users\ADMIN\Documents\Cs2 arbitrage\stockx-arb\state.db" root@<vps-ip>:/root/state.db
 ```
 
-It goes to `root@` because `arb` has no login shell (step 2), and it stages in
-`/root` — mode 700 — rather than `/tmp`, which is world-readable to every
-account on the box. `state.db` carries your live StockX tokens, so it must not
-sit in a public directory even for a moment. Then on the VPS:
+(If you're on the sudo-user path from step 2, scp to your own home instead —
+e.g. `debian@<vps-ip>:/home/debian/` — since `arb` has no login shell and
+`/root` isn't writable by a non-root account.)
+
+It stages in `/root` (or your home dir) — mode 700 — rather than `/tmp`,
+which is world-readable to every account on the box. `state.db` carries your
+live StockX tokens, so it must not sit in a public directory even for a
+moment. Then on the VPS:
 
 ```bash
-mv /root/state.db /opt/stockx-arb/state.db
-chown arb:arb /opt/stockx-arb/state.db
-chmod 600 /opt/stockx-arb/state.db
+mv /root/state.db /opt/stockx-arb/state.db      # or sudo mv ~/state.db ...
+chown arb:arb /opt/stockx-arb/state.db          # or sudo chown ...
+chmod 600 /opt/stockx-arb/state.db              # or sudo chmod ...
 ```
 
 Copy `state.db` only — **not** `state.db-wal` or `state.db-shm`. With the local
@@ -155,9 +171,16 @@ is sound. `status` confirms credentials load and shows the API budget.
 ```bash
 cp /opt/stockx-arb/deploy/stockx-arb-scanner.service /etc/systemd/system/
 cp /opt/stockx-arb/deploy/stockx-arb-dashboard.service /etc/systemd/system/
+cp /opt/stockx-arb/deploy/stockx-arb-logrotate /etc/logrotate.d/stockx-arb
 systemctl daemon-reload
 systemctl enable --now stockx-arb-scanner stockx-arb-dashboard
 ```
+
+The scanner unit writes its output to BOTH journald and `scanner.log` /
+`scanner.err.log` in `/opt/stockx-arb` — the files exist specifically because
+the dashboard's "Live log" panel reads them (`arb/dashboard.py:_tail`), not
+journald. Without the logrotate config those files grow forever; on Windows
+`scanner.log` reached ~22MB in about a week with nothing capping it.
 
 Check it:
 
@@ -180,7 +203,7 @@ The dashboard has **no authentication** and shows your live opportunities and
 API budget, so it binds to `127.0.0.1` only. Tunnel to it:
 
 ```bash
-ssh -N -L 8787:127.0.0.1:8787 root@<vps-ip>
+ssh -N -L 8787:127.0.0.1:8787 root@<vps-ip>    # or debian@<vps-ip> etc.
 ```
 
 Then open `http://127.0.0.1:8787` in your own browser. Do not "fix" this by
