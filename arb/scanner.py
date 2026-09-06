@@ -76,12 +76,16 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
                      retailer_name, len(changed))
 
         candidates = [p for p in products if _cheap_screen(p, cfg)]
-        # Spend the scarce resource — market-data calls — on marked-down stock
-        # first. Full-price sneakers almost never beat a StockX bid; the only
-        # completed trade so far was a markdown (€75.99 against a €176 bid).
-        # market_calls_per_scan and the daily budget both cut this list off
-        # partway through, so the ORDER decides what actually gets priced.
-        candidates.sort(key=_discount_rank, reverse=True)
+        # The ORDER decides what actually gets priced and how soon: candidates
+        # are evaluated one at a time against a 1 req/s API, so position N in
+        # this list is roughly N seconds of latency, and market_calls_per_scan
+        # cuts the tail off entirely. Rank by what we already KNOW first (the
+        # cached verdict from the last evaluation — a shoe that was +EUR 76
+        # last week goes before anything unassessed), then by markdown depth
+        # (the best prior when nothing is known: the only completed trade was
+        # a markdown). A full-price pair with a cached +EUR 76 used to rank
+        # dead last behind every sale item and waited 14 minutes for its call.
+        candidates.sort(key=lambda p: _prior_rank(p, db, cfg), reverse=True)
         if limit:
             candidates = candidates[:limit]
         stats.candidates = len(candidates)
@@ -143,6 +147,21 @@ def _discount_rank(p: Product) -> float:
     if not p.on_sale or not p.list_price or p.list_price <= p.price:
         return 0.0
     return (p.list_price - p.price) / p.list_price
+
+
+def _prior_rank(p: Product, db: Database, cfg: AppConfig
+                ) -> tuple[int, float, float]:
+    """Sort key: (has a cached near-miss-or-better verdict, that verdict,
+    markdown depth). Known-close beats deep-discount-unknown beats
+    known-hopeless and full-price-unknown, which share the discount tiebreak.
+    Costs two indexed lookups and no API call."""
+    codes = style_code_candidates_from_sku(p.style_code or "")
+    if p.style_code and p.style_code not in codes:
+        codes.insert(0, p.style_code)
+    prior = db.prior_best_profit(codes)
+    close = (prior is not None
+             and prior >= cfg.filters.min_profit_eur - cfg.stockx.near_miss_eur)
+    return (1 if close else 0, prior if close else 0.0, _discount_rank(p))
 
 
 def _cheap_screen(p: Product, cfg: AppConfig) -> bool:
@@ -400,7 +419,11 @@ def _market_ttl_minutes(db: Database, product_id: str, cfg: AppConfig) -> int:
         # Assessed, and no variant had a live bid at all. Under
         # require_live_bid these can never alert, so treating NULL as "hot"
         # spent half the daily budget refreshing bid-less shoes 32x/day.
-        return cfg.stockx.refresh_minutes_cold
+        # They get their own (slower) cadence when configured, so the cold
+        # tier can tighten for shoes that DO have a bid without doubling the
+        # spend on the 46% that have none.
+        return (cfg.stockx.refresh_minutes_nobid
+                or cfg.stockx.refresh_minutes_cold)
     gap = cfg.filters.min_profit_eur - watch["best_profit"]
     if gap <= 0:
         return cfg.stockx.refresh_minutes_hot        # currently profitable
@@ -588,10 +611,122 @@ async def _maybe_alert(opp: Opportunity, scraper: RetailerScraper, cfg: AppConfi
     stats.alerts_sent += 1
 
 
+def _product_from_row(row: dict) -> Product:
+    """Rebuild a Product from its retail_products row for re-pricing.
+
+    price_verified is deliberately False: the row is the last sighting, not a
+    live fact. _evaluate_product enriches from the product page before any
+    alert, so a delisted or repriced item is caught there rather than trusted.
+    """
+    from .models import RetailSize
+    sizes = [RetailSize(**s) for s in json.loads(row.get("sizes_json") or "[]")]
+    return Product(
+        retailer=row["retailer"], url=row["url"], name=row["name"] or "",
+        brand=row.get("brand"), style_code=row.get("style_code"),
+        price=float(row["price"]), currency=row.get("currency") or "EUR",
+        sizes=sizes, in_stock=bool(row.get("in_stock", 1)),
+        on_sale=bool(row.get("on_sale", 0)), list_price=row.get("list_price"),
+        price_verified=False,
+    )
+
+
+async def run_watch_refresh(cfg: AppConfig, db: Database,
+                            resolver: CatalogResolver,
+                            provider: MarketDataProvider, notifier: Notifier,
+                            once: bool = False) -> ScanStats:
+    """Re-price hot/warm SKUs on their own TTL, independent of retailer scans.
+
+    Why this exists: a SKU's bid was only refreshed when its retailer happened
+    to rescan, so the tier TTLs were bounded by scan_interval_minutes — a
+    45-minute "hot" TTL at a retailer scanned every 120 minutes meant 120. On
+    a machine that is up 24/7 that left ~60% of the daily API budget unused
+    while the SKUs most likely to alert waited for their retailer's turn.
+
+    Deliberately yields to retailer scans: those DISCOVER new stock, this only
+    re-checks known stock, so it pauses at watch_budget_ceiling_pct and never
+    competes for the last slice of budget. Every candidate goes through the
+    normal _evaluate_product path — live market data, then product-page
+    confirmation before any alert — so nothing here can alert on a stale row.
+    """
+    interval = cfg.stockx.watch_refresh_interval_minutes * 60
+    ceiling = int(cfg.stockx.daily_request_budget
+                  * cfg.stockx.watch_budget_ceiling_pct)
+    stats = ScanStats()
+    while True:
+        stats = ScanStats()
+        started_at = datetime.now(timezone.utc).isoformat()
+        due: list[dict] = []
+        used = db.api_requests_last_24h()
+        if used >= ceiling:
+            log.info("watch-refresh: %d/%d requests used in 24h — above the "
+                     "%.0f%% ceiling, leaving the rest to retailer scans",
+                     used, cfg.stockx.daily_request_budget,
+                     cfg.stockx.watch_budget_ceiling_pct * 100)
+        else:
+            due = db.due_watches(
+                cfg.filters.min_profit_eur, cfg.stockx.near_miss_eur,
+                cfg.stockx.refresh_minutes_hot, cfg.stockx.refresh_minutes_warm,
+                cfg.stockx.watch_batch)
+            scrapers: dict[str, RetailerScraper] = {}
+            try:
+                for w in due:
+                    rows = [r for r in db.retail_rows_for_product(w["product_id"])
+                            if cfg.retailers.get(r["retailer"]) is not None
+                            and cfg.retailers[r["retailer"]].enabled]
+                    if not rows:
+                        # nothing purchasable behind this SKU any more; stamp
+                        # it so it is not re-selected every round
+                        db.put_watch(w["product_id"], w["best_profit"])
+                        continue
+                    for row in rows:
+                        product = _product_from_row(row)
+                        rcfg = cfg.retailers[product.retailer]
+                        product.extra_cost_eur = rcfg.extra_cost_eur
+                        product.discount_pct = rcfg.discount_pct
+                        product.sale_discount_pct = rcfg.sale_discount_pct
+                        product.buy_note = rcfg.buy_note or None
+                        if not _cheap_screen(product, cfg):
+                            continue
+                        scraper = scrapers.get(product.retailer)
+                        if scraper is None:
+                            scraper = create_scraper(product.retailer, rcfg, db)
+                            scrapers[product.retailer] = scraper
+                        stats.candidates += 1
+                        try:
+                            opps, _used_call = await _evaluate_product(
+                                product, cfg, db, resolver, provider, scraper,
+                                allow_market_call=True, force_fresh=True)
+                        except StockXAPIError as e:
+                            log.warning("watch-refresh skipping %s — StockX "
+                                        "said %s", product.url, e.message)
+                            continue
+                        for opp in opps:
+                            stats.opportunities += 1
+                            await _maybe_alert(opp, scraper, cfg, db, notifier,
+                                               stats)
+            except BudgetExhausted as e:
+                log.warning("watch-refresh stopping this round: %s", e)
+            except Exception:
+                log.exception("watch-refresh round failed; continuing after "
+                              "interval")
+            finally:
+                for sc in scrapers.values():
+                    await sc.close()
+                db.log_scan("watch", started_at, len(due), stats.candidates,
+                            stats.opportunities, stats.alerts_sent)
+            log.info("watch-refresh: %d due, %d re-priced, %d opportunities, "
+                     "%d alerts", len(due), stats.candidates,
+                     stats.opportunities, stats.alerts_sent)
+        if once:
+            return stats
+        await asyncio.sleep(interval)
+
+
 async def run_loop(cfg: AppConfig, db: Database, resolver: CatalogResolver,
                    provider: MarketDataProvider, notifier: Notifier,
                    retailer_filter: Optional[str] = None) -> None:
-    """Simple asyncio loop: each enabled retailer scans on its own interval."""
+    """Simple asyncio loop: each enabled retailer scans on its own interval,
+    plus one watch-refresh task re-pricing hot/warm SKUs on their tier TTL."""
 
     async def loop_one(name: str) -> None:
         interval = cfg.retailers[name].scan_interval_minutes * 60
@@ -610,4 +745,7 @@ async def run_loop(cfg: AppConfig, db: Database, resolver: CatalogResolver,
              if rc.enabled and (retailer_filter is None or n == retailer_filter)]
     if not names:
         raise SystemExit("no enabled retailers matched")
-    await asyncio.gather(*(loop_one(n) for n in names))
+    tasks = [loop_one(n) for n in names]
+    if retailer_filter is None:     # single-retailer debugging stays single
+        tasks.append(run_watch_refresh(cfg, db, resolver, provider, notifier))
+    await asyncio.gather(*tasks)

@@ -97,13 +97,31 @@ stockx:
   # overnight (client.py raises once the budget is reached) and priced nothing
   # until morning. Blind is worse than slow.
   #
-  # Theoretical here is 14,454/day = 62%. The headroom is deliberate: the
-  # projection models market refreshes only, while catalog search/variant
-  # resolution calls draw on the same budget.
-  refresh_minutes_hot: 45         # profitable now, or within a whisker
-  refresh_minutes_warm: 180       # within near_miss_eur of the floor
-  refresh_minutes_cold: 720       # bid nowhere near retail — still 2x/day
+  # Theoretical there was 14,454/day = 62%; measured steady state on the VPS
+  # (2026-09-06, six days of 24/7 uptime) was ~9,400/day = 40%. The gap is
+  # structural: a SKU was only re-priced when its RETAILER rescanned, so a TTL
+  # shorter than that retailer's scan_interval_minutes never applied — "hot"
+  # at a 120-minute retailer meant 120 minutes. The watch-refresh loop
+  # (run_watch_refresh in scanner.py, settings below) decouples the two, so
+  # these TTLs now actually bind and the budget can be spent where alerts
+  # come from. Tightened 2026-09-06 accordingly; no-bid SKUs got their own
+  # slower tier so cold could tighten without doubling spend on the 46% that
+  # have no bid at all.
+  #
+  # Theoretical now: hot 62x48 + warm 720x9.6 + cold 1,714x3 + nobid 2,109x2
+  # = ~19,200/day = 82%. The watch loop yields at 85% (watch_budget_ceiling_pct)
+  # so retailer scans — the only thing that DISCOVERS new stock — keep the rest.
+  refresh_minutes_hot: 30         # profitable now, or within a whisker
+  refresh_minutes_warm: 150       # within near_miss_eur of the floor
+  refresh_minutes_cold: 480       # has a bid, nowhere near retail — 3x/day
+  refresh_minutes_nobid: 720      # no bid on any variant — 2x/day
   near_miss_eur: 60.0             # widened: moves 491 products cold -> warm
+  # Watch-refresh loop (see above). Every round takes the hot/warm SKUs whose
+  # bids are past their TTL, hot first, and re-prices them through the normal
+  # pipeline — live market data, then product-page confirmation before alert.
+  watch_refresh_interval_minutes: 10
+  watch_batch: 200
+  watch_budget_ceiling_pct: 0.85
   # Full-sweep settings: the real limiter is daily_request_budget above (StockX
   # allows 1 req/s), so these are deliberately high â€” every cycle grinds through
   # as much of the catalog as the budget allows, and resolutions cache forever.
@@ -113,7 +131,11 @@ stockx:
   # profitable, and cached forever (barcodes never change), so the cost is
   # one-off per shoe/size. Rademar, SNS and Overkill supply EANs.
   gtin_lookups_per_scan: 400
-  negative_cache_days: 3          # re-try style codes that resolved to nothing after this
+  # Re-try style codes that resolved to nothing after this many days. At 3 it
+  # was re-searching ~935 dead codes a day (10% of budget). StockX lists a
+  # product at release and retailers stock it after, so a code absent today
+  # is very unlikely to appear within a week; 7 halves that spend.
+  negative_cache_days: 7
 
 notifications:
   method: discord                 # discord | telegram | console
@@ -231,16 +253,20 @@ retailers:
   # ---- Tier 3: EU (least frequent; big robots crawl-delays honored) ----
   sns:
     enabled: true
-    scan_interval_minutes: 120
+    # SNS produced 2 of the first 5 real alerts but had the slowest cadence:
+    # every product page is fetched under their 10s Crawl-delay, so a scan of
+    # ~227 sale handles + 250 rotation took ~80 min, plus a 120 min sleep =
+    # a ~200 min cycle. Rebalanced 2026-09-06: shorter sleep, smaller
+    # rotation. Sale pages (where the alerts come from) now get checked ~1.6x
+    # as often; catalog rotation coverage per day is unchanged (150 x ~12
+    # cycles ~= 250 x ~7); total requests to SNS rise ~30%, still well inside
+    # their stated Crawl-delay.
+    scan_interval_minutes: 60
     request_delay_seconds: 10.0   # robots Crawl-delay: 10
     categories:
       - /collections/sale         # fresh discounts every scan, all pages
     max_pages: 10                 # sale collection pagination
-    # Their robots.txt asks for a 10s crawl delay, which we honour â€” so the
-    # limit is time, not politeness. 250 + sale pages is roughly 45 min of a
-    # 120 min window, and covers their whole filtered catalog in under a day
-    # instead of 8 days.
-    sitemap_slice_per_scan: 250
+    sitemap_slice_per_scan: 150
     slug_filters: [nike, jordan, adidas, new-balance, asics, salomon, puma,
                    converse, vans, hoka, saucony, reebok, yeezy, dunk, samba]
 

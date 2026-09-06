@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from typing import Optional
+
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -101,8 +103,22 @@ class StockXConfig(BaseModel):
     refresh_minutes_hot: int = 45      # already profitable, or within a whisker
     refresh_minutes_warm: int = 240    # within near_miss_eur of the floor
     refresh_minutes_cold: int = 1440   # nowhere near — once a day is plenty
+    # Assessed, and NO variant had a live bid. Under require_live_bid these
+    # cannot alert until a bid appears, so they are the least valuable call per
+    # unit of budget — but not worthless (the one completed trade went from no
+    # bid to EUR 176 inside a day). None = same cadence as cold.
+    refresh_minutes_nobid: Optional[int] = None
     near_miss_eur: float = 30.0
     negative_cache_days: int = 3
+    # Watch-refresh loop: re-prices hot/warm SKUs on their tier TTL regardless
+    # of when their retailer next rescans. Without it a tier TTL shorter than
+    # the retailer's scan_interval_minutes never actually applies.
+    watch_refresh_interval_minutes: int = 10
+    watch_batch: int = 200             # SKUs per round, hot first
+    # The loop yields to retailer scans (which are what DISCOVER new stock):
+    # it pauses once the rolling 24h usage passes this fraction of the daily
+    # budget, so retailers keep the remainder and the hard stop stays theirs.
+    watch_budget_ceiling_pct: float = 0.85
 
 
 class NotificationsConfig(BaseModel):

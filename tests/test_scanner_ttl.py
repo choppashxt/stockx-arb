@@ -44,3 +44,15 @@ class TestMarketTtlTiers:
                      cfg.filters.min_profit_eur - cfg.stockx.near_miss_eur - 50)
         assert _market_ttl_minutes(db, "p-cold", cfg) == \
             cfg.stockx.refresh_minutes_cold
+
+    def test_no_bid_uses_its_own_tier_when_configured(self):
+        db, cfg = make()
+        cfg.stockx.refresh_minutes_nobid = cfg.stockx.refresh_minutes_cold * 2
+        db.put_watch("p-nobid", None)
+        assert _market_ttl_minutes(db, "p-nobid", cfg) ==             cfg.stockx.refresh_minutes_nobid
+
+    def test_no_bid_falls_back_to_cold_when_unset(self):
+        db, cfg = make()
+        cfg.stockx.refresh_minutes_nobid = None
+        db.put_watch("p-nobid", None)
+        assert _market_ttl_minutes(db, "p-nobid", cfg) ==             cfg.stockx.refresh_minutes_cold

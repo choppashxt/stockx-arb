@@ -129,7 +129,24 @@ Discord (or Telegram, or console in --dry-run)
 ```
 
 `run_loop()` runs every enabled retailer as its own asyncio task on its own
-`scan_interval_minutes`; retailers do not block each other.
+`scan_interval_minutes`; retailers do not block each other. Alongside them runs
+one **watch-refresh** task (`run_watch_refresh()`): every
+`watch_refresh_interval_minutes` it takes the hot/warm SKUs in `sku_watch`
+whose bids are older than their tier TTL (`db.due_watches`, hot first), finds
+their in-stock retail listings (`db.retail_rows_for_product`), and pushes each
+through the normal `_evaluate_product` path — live market data, then
+product-page confirmation before any alert. It exists because without it a
+SKU was only re-priced when its retailer next rescanned, so tier TTLs were
+silently bounded by `scan_interval_minutes`. It yields to retailer scans
+(pauses above `watch_budget_ceiling_pct` of the daily budget) since those are
+what discover new stock. Its rounds appear in `scan_log` as retailer `watch`.
+
+Within a retailer scan, candidates are ordered by `_prior_rank`: the cached
+verdict from the last evaluation first (a pair last seen at +EUR 76 is
+re-priced before a thousand unassessed markdowns), then markdown depth. Since
+candidates are evaluated one at a time against a 1 req/s API, list position is
+latency — a full-price pair with a cached +EUR 76 once waited 14 minutes
+behind every sale item because markdown depth was the only key.
 
 ---
 
@@ -230,11 +247,14 @@ Retailers not integrated, with the evidence for why:
 **Tiered re-check budget** (`_market_ttl_minutes` in `scanner.py`, driven by
 `sku_watch` table): a product that already clears the profit floor, or is
 within `near_miss_eur` of it, gets checked every `refresh_minutes_hot`/`_warm`
-minutes; everything else — including anything that has literally no live bid
-on any variant — only once a day (`refresh_minutes_cold`). Without the
-NULL-bid distinction, ~50% of the daily API budget was being spent
-re-refreshing shoes that could structurally never alert (`require_live_bid`
-with no bid = never).
+minutes; everything else with a bid every `refresh_minutes_cold`; anything
+with literally no live bid on any variant every `refresh_minutes_nobid` (falls
+back to cold when unset). Without the NULL-bid distinction, ~50% of the daily
+API budget was being spent re-refreshing shoes that could structurally never
+alert (`require_live_bid` with no bid = never); the separate nobid tier lets
+cold tighten for shoes that do have a bid without doubling spend on the ~46%
+that have none. Hot/warm TTLs only actually bind because of the watch-refresh
+task (§3) — a retailer scan alone can't re-price faster than its own interval.
 
 ---
 

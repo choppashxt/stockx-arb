@@ -263,6 +263,77 @@ class Database:
                           (product_id, best_profit, _now()))
         self.conn.commit()
 
+    def due_watches(self, min_profit: float, near_miss: float,
+                    hot_ttl_minutes: int, warm_ttl_minutes: int,
+                    limit: int) -> list[dict]:
+        """Hot/warm SKUs whose bids are older than their tier allows.
+
+        Feeds the watch-refresh loop. A product's re-check cadence used to be
+        bounded by its RETAILER's scan interval, not its tier: a "hot" SKU at a
+        retailer scanned every 120 minutes was re-priced every 120 minutes, and
+        the 45-minute hot TTL never applied. Selecting by tier here decouples
+        the two. Hot first, then by how close each came, so the scarce API
+        slots go to the most promising SKU system-wide.
+        """
+        now = datetime.now(timezone.utc)
+        hot_cut = (now - timedelta(minutes=hot_ttl_minutes)).isoformat()
+        warm_cut = (now - timedelta(minutes=warm_ttl_minutes)).isoformat()
+        rows = self.conn.execute(
+            """SELECT product_id, best_profit, checked_at FROM sku_watch
+               WHERE best_profit IS NOT NULL
+                 AND best_profit >= ?
+                 AND checked_at < CASE WHEN best_profit >= ? THEN ? ELSE ? END
+               ORDER BY (best_profit >= ?) DESC, best_profit DESC
+               LIMIT ?""",
+            (min_profit - near_miss, min_profit, hot_cut, warm_cut,
+             min_profit, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+    def retail_rows_for_product(self, product_id: str,
+                                max_age_hours: int = 48) -> list[dict]:
+        """In-stock retail listings that resolved to this StockX product.
+
+        Joins through the resolution cache: a retail row's style code is the
+        cache key (or the cached product's own style_id) of the stockx_products
+        row whose product_json carries this product_id. Only recently-seen,
+        in-stock rows: a listing nobody has seen for two days is not something
+        to spend a market-data call on.
+        """
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(hours=max_age_hours)).isoformat()
+        rows = self.conn.execute(
+            """SELECT DISTINCT rp.* FROM retail_products rp
+               JOIN stockx_products sp
+                 ON sp.found = 1
+                AND (upper(trim(rp.style_code)) = upper(trim(sp.cache_key))
+                     OR upper(trim(rp.style_code)) =
+                        upper(trim(json_extract(sp.product_json, '$.style_id'))))
+               WHERE json_extract(sp.product_json, '$.product_id') = ?
+                 AND rp.in_stock = 1
+                 AND rp.last_seen > ?""",
+            (product_id, cutoff)).fetchall()
+        return [dict(r) for r in rows]
+
+    def prior_best_profit(self, style_codes: list[str]) -> Optional[float]:
+        """What the last evaluation of this shoe concluded, if anything.
+
+        Used to ORDER candidates before any API call is spent: a product whose
+        cached verdict was +EUR 76 should be re-priced before a thousand
+        markdowns nobody has ever checked. None = never evaluated, or no bid.
+        """
+        keys = [k for k in style_codes if k]
+        if not keys:
+            return None
+        marks = ",".join("?" * len(keys))
+        row = self.conn.execute(
+            f"""SELECT w.best_profit FROM stockx_products sp
+                JOIN sku_watch w
+                  ON w.product_id = json_extract(sp.product_json, '$.product_id')
+                WHERE sp.found = 1 AND sp.cache_key IN ({marks})
+                ORDER BY w.best_profit DESC LIMIT 1""",
+            keys).fetchone()
+        return row["best_profit"] if row else None
+
     def get_gtin(self, gtin: str) -> Optional[tuple[Optional[StockXVariant]]]:
         """None = never looked up. (None,) = cached 'StockX has no such
         barcode'. (variant,) = hit. Barcodes are immutable, so no TTL."""
