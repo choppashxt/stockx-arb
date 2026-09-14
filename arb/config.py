@@ -197,6 +197,14 @@ class RetailerConfig(BaseModel):
     promo_scan_interval_minutes: Optional[int] = None
     promo_sitemap_slice_per_scan: Optional[int] = None
     promo_max_pages: Optional[int] = None
+    # Stand this retailer down through this date (inclusive, Tallinn time) so a
+    # campaign elsewhere gets the shared StockX budget. Unlike enabled: false
+    # this reverts on its own, which matters because the cost of forgetting is
+    # invisible: the shop simply stops being scanned and nobody notices the
+    # alerts that never came. It stops the scan loop AND the watch-refresh loop
+    # — leaving the latter running would keep re-pricing the very SKUs the
+    # pause is meant to stop paying for.
+    paused_until: Optional[date] = None
 
     @property
     def effective_discount_pct(self) -> float:
@@ -207,6 +215,16 @@ class RetailerConfig(BaseModel):
     def effective_sale_discount_pct(self) -> float:
         """sale_discount_pct, or 0.0 once the campaign carrying it has ended."""
         return self.sale_discount_pct if promo_live(self.discount_expires) else 0.0
+
+    @property
+    def paused_today(self) -> bool:
+        """Stood down for a campaign window elsewhere."""
+        return self.paused_until is not None and promo_live(self.paused_until)
+
+    @property
+    def effective_enabled(self) -> bool:
+        """Should this retailer be scanned and re-priced right now?"""
+        return self.enabled and not self.paused_today
 
     @property
     def promo_boost_active(self) -> bool:

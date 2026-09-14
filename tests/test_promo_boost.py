@@ -102,9 +102,12 @@ def retailers():
 
 
 class TestLiveConfig:
-    def test_promo_retailers_are_boosted_today(self, retailers):
-        assert retailers["ballzy"].effective_scan_interval_minutes == 10
-        assert retailers["sportland"].effective_scan_interval_minutes == 14
+    def test_promo_retailers_are_boosted_today(self, retailers, monkeypatch):
+        _freeze(monkeypatch, TODAY)
+        assert retailers["ballzy"].effective_scan_interval_minutes == 8
+        assert retailers["sportland"].effective_scan_interval_minutes == 12
+        assert retailers["ballzy"].scan_interval_minutes == 15      # base intact
+        assert retailers["sportland"].scan_interval_minutes == 20
 
     def test_boost_never_touches_politeness(self, retailers):
         # robots.txt Crawl-delay compliance is not a throughput knob
@@ -135,3 +138,61 @@ class TestScraperGetsTheBoost:
         _freeze(monkeypatch, TOMORROW)
         s = create_scraper("sportland", _boosted())
         assert s.cfg.sitemap_slice_per_scan == 1200
+
+
+class TestCampaignPause:
+    """Standing a retailer down so a campaign elsewhere gets the budget.
+
+    paused_until rather than enabled: false, because forgetting to undo this one
+    is silent — the shop just stops being scanned and nobody notices the alerts
+    that never arrived.
+    """
+
+    def test_paused_retailer_is_not_scanned(self, monkeypatch):
+        _freeze(monkeypatch, TODAY)
+        r = RetailerConfig(enabled=True, paused_until=TODAY)
+        assert r.paused_today is True
+        assert r.effective_enabled is False
+
+    def test_pause_lifts_on_its_own(self, monkeypatch):
+        _freeze(monkeypatch, TOMORROW)
+        r = RetailerConfig(enabled=True, paused_until=TODAY)
+        assert r.effective_enabled is True
+
+    def test_pause_cannot_re_enable_a_disabled_retailer(self, monkeypatch):
+        # sportland_lv is off for a reason that has nothing to do with campaigns
+        _freeze(monkeypatch, TOMORROW)
+        assert RetailerConfig(enabled=False, paused_until=TODAY).effective_enabled is False
+
+    def test_no_pause_means_enabled_decides(self, monkeypatch):
+        _freeze(monkeypatch, TODAY)
+        assert RetailerConfig(enabled=True).effective_enabled is True
+
+
+class TestTodaysFocus:
+    """The live config for the 2026-09-14 campaign day."""
+
+    PROMO = {"ballzy", "sportland"}
+
+    def test_only_the_promo_shops_run_today(self, retailers, monkeypatch):
+        _freeze(monkeypatch, TODAY)
+        live = {n for n, r in retailers.items() if r.effective_enabled}
+        assert live == self.PROMO
+
+    def test_the_promo_shops_are_never_the_ones_paused(self, retailers):
+        for n in self.PROMO:
+            assert retailers[n].paused_until is None, f"{n} is the point of today"
+
+    def test_everything_comes_back_tomorrow(self, retailers, monkeypatch):
+        _freeze(monkeypatch, TOMORROW)
+        live = {n for n, r in retailers.items() if r.effective_enabled}
+        assert live > self.PROMO, "a pause that outlives the campaign is the bug"
+        assert "reede" in live and "rademar" in live and "sns" in live
+
+    def test_no_pause_is_open_ended(self, retailers):
+        # a pause with no end date cannot be expressed, but check the intent:
+        # every paused shop carries a real date, not a far-future placeholder
+        for n, r in retailers.items():
+            if r.paused_until is not None:
+                assert r.paused_until <= date(2026, 9, 30), \
+                    f"{n} paused until {r.paused_until} — that is not a campaign"

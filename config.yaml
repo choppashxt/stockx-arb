@@ -59,8 +59,14 @@ filters:
   strict_liquidity: false
 
 alerts:
-  max_per_scan: 20                # per-opportunity messages per scan; the rest are
-                                  # not lost â€” they alert on the next cycle
+  max_per_scan: 40                # per-opportunity messages per scan; the rest are
+                                  # not lost â€” they alert on the next cycle.
+                                  # Raised from 20 on 2026-09-14: a storewide
+                                  # promo makes far more of the catalogue clear
+                                  # the floor at once, and at 20 the surplus
+                                  # trickles out a scan at a time. Safe to
+                                  # leave: dedup still alerts each opportunity
+                                  # once, so this only drains a backlog faster.
   re_alert_profit_delta_eur: 10.0 # re-alert an already-seen opportunity if profit moves this much
 
 stockx:
@@ -161,7 +167,7 @@ retailers:
     # Campaign-window boost: 15 -> 10 min while the -25% runs, so newly
     # arbitrageable stock is found sooner. request_delay_seconds is NOT touched
     # — robots.txt asks Crawl-delay 2 and 2.5 stays. Lapses with the discount.
-    promo_scan_interval_minutes: 10
+    promo_scan_interval_minutes: 8
     # Sale-items-only promos go here instead. 0.0 since the last one ended
     # (confirmed 2026-08-09): while it was 0.15 every Ballzy sale item was
     # priced 15% below what it actually costs — an Air Force 1 at EUR 89 was
@@ -180,6 +186,9 @@ retailers:
 
   reede:
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     scan_interval_minutes: 15
     request_delay_seconds: 2.5
     categories:                   # page 1 of each is scanned every cycle (fresh)
@@ -200,6 +209,9 @@ retailers:
 
   teamsport:
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     scan_interval_minutes: 15
     request_delay_seconds: 2.5
     # registered-client pricing: 10% off everything, applied before profit is
@@ -212,6 +224,9 @@ retailers:
 
   rademar:
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     scan_interval_minutes: 15
     request_delay_seconds: 2.5
     sitemap_slice_per_scan: 500   # ~= their whole filtered catalog
@@ -235,8 +250,8 @@ retailers:
     # 2026-07-27, and being blocked today would cost more than the extra
     # coverage wins. request_delay_seconds stays at 4.0. Lapses with the
     # discount, so the heavier crawl cannot outlive the campaign.
-    promo_scan_interval_minutes: 14
-    promo_sitemap_slice_per_scan: 1800
+    promo_scan_interval_minutes: 12
+    promo_sitemap_slice_per_scan: 2400
     # 5000 (125 back-to-back GraphQL batches) made them start dropping our
     # connections on 2026-07-27 â€” verified afterwards that they still answer
     # fine at low volume, so this is a rate ceiling, not a block. 1200 = 30
@@ -269,6 +284,9 @@ retailers:
     # arrangement — he buys and sells on your behalf, so there is NO per-unit
     # cost to add. Profit figures for this source are correct as printed.
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     extra_cost_eur: 0.0
     # NO DISCOUNT: Sportland's storewide campaigns are per-country, and the
     # -20% running on .ee on 2026-09-14 does NOT apply here (confirmed
@@ -291,6 +309,9 @@ retailers:
   # ---- Tier 3: EU (least frequent; big robots crawl-delays honored) ----
   sns:
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     # SNS produced 2 of the first 5 real alerts but had the slowest cadence:
     # every product page is fetched under their 10s Crawl-delay, so a scan of
     # ~227 sale handles + 250 rotation took ~80 min, plus a 120 min sleep =
@@ -329,6 +350,9 @@ retailers:
     # where the old one didn't. No UA/TLS/proxy change was made; if this
     # regresses, disable again rather than adding evasion.
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     # Kept at the gentler profile from the 2026-08-10 backoff rather than
     # restoring the original ~168-query scan — no need to push harder than
     # this until there's a reason to.
@@ -348,6 +372,9 @@ retailers:
     # cut and the scraper then requires a 4-6 digit set number in the product
     # name — which is exactly what separates Lego SETS from Lego picture-books.
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     scan_interval_minutes: 180
     request_delay_seconds: 2.5      # robots states no Crawl-delay; be polite anyway
     sitemap_slice_per_scan: 100
@@ -364,6 +391,9 @@ retailers:
     # which it is. That refusal is the point — a mismatched unit fails
     # authentication while looking correct in the name.
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     scan_interval_minutes: 240
     request_delay_seconds: 2.5      # robots sets Crawl-delay 2 for GPTBot only
     sitemap_slice_per_scan: 60
@@ -381,6 +411,9 @@ retailers:
     # Berlin boutique; hype-heavy stock. Ships to Estonia: DHL EUR13, 2-5 days
     # (verified on their shipping page 2026-07-27) â€” charged as landed cost.
     enabled: true
+    # STOOD DOWN 2026-09-14: the Ballzy -25% / Sportland -20% campaigns
+    # get the shared StockX budget today. Reverts on its own tomorrow.
+    paused_until: 2026-09-14
     scan_interval_minutes: 120
     request_delay_seconds: 4.0
     extra_cost_eur: 13.0

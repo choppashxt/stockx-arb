@@ -81,7 +81,7 @@ def collect_stats(cfg: AppConfig) -> dict[str, Any]:
     out["scanner"]["seconds_since_heartbeat"] = (
         round(hb_age) if hb_age is not None else None)
     enabled_intervals = [rc.scan_interval_minutes
-                         for rc in cfg.retailers.values() if rc.enabled]
+                         for rc in cfg.retailers.values() if rc.effective_enabled]
     # stale threshold: 2x the fastest enabled interval, floor 30 min
     # (a single scan can legitimately take 20+ min on slow retailers)
     hb_stale_s = max(2 * 60 * min(enabled_intervals, default=15), 1800)
@@ -168,12 +168,13 @@ def collect_stats(cfg: AppConfig) -> dict[str, Any]:
         scanning = bool(started and (not finished or started > finished))
         retailers.append({
             "name": name,
-            "enabled": rc.enabled,
+            "enabled": rc.effective_enabled,
             "interval_min": rc.scan_interval_minutes,
             "scanning": scanning,
             "scanning_for_s": round(_age(started) or 0) if scanning else None,
             "last_scan_age_s": round(age) if age is not None else None,
-            "overdue": bool(rc.enabled and not scanning and age is not None
+            "overdue": bool(rc.effective_enabled and not scanning
+                            and age is not None
                             and age > interval_s * 2),
             "products_seen": row["products_seen"] if row else None,
             "candidates": row["candidates"] if row else None,

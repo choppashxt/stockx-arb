@@ -107,7 +107,8 @@ async def _cmd_scan(args) -> int:
     try:
         if args.once:
             retailers = ([args.retailer] if args.retailer else
-                         [n for n, rc in cfg.retailers.items() if rc.enabled])
+                         [n for n, rc in cfg.retailers.items()
+                          if rc.effective_enabled])
             for name in retailers:
                 await run_scan(name, cfg, db, resolver, provider, notifier,
                                limit=args.limit,

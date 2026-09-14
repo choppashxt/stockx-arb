@@ -699,7 +699,7 @@ async def run_watch_refresh(cfg: AppConfig, db: Database,
                 for w in due:
                     rows = [r for r in db.retail_rows_for_product(w["product_id"])
                             if cfg.retailers.get(r["retailer"]) is not None
-                            and cfg.retailers[r["retailer"]].enabled]
+                            and cfg.retailers[r["retailer"]].effective_enabled]
                     if not rows:
                         # nothing purchasable behind this SKU any more; stamp
                         # it so it is not re-selected every round
@@ -772,7 +772,8 @@ async def run_loop(cfg: AppConfig, db: Database, resolver: CatalogResolver,
                 cfg.retailers[name].effective_scan_interval_minutes * 60)
 
     names = [n for n, rc in cfg.retailers.items()
-             if rc.enabled and (retailer_filter is None or n == retailer_filter)]
+             if rc.effective_enabled
+             and (retailer_filter is None or n == retailer_filter)]
     if not names:
         raise SystemExit("no enabled retailers matched")
     tasks = [loop_one(n) for n in names]
