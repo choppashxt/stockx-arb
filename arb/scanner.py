@@ -364,7 +364,8 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
             continue
         opp = _build_opportunity(product, size.label,
                                  size.us_size or variant.size or "?",
-                                 sx_product, variant, market, confidence, cfg)
+                                 sx_product, variant, market, confidence, cfg,
+                                 size_system=size.system)
         if opp is not None:
             opp.size_match_method = method
             opportunities.append(opp)
@@ -480,7 +481,8 @@ def _match_retail_size(size, variants):
 def _build_opportunity(product: Product, size_label: Optional[str],
                        us_size: Optional[str],
                        sx_product, variant, market: MarketData,
-                       confidence: float, cfg: AppConfig) -> Optional[Opportunity]:
+                       confidence: float, cfg: AppConfig,
+                       size_system: Optional[str] = None) -> Optional[Opportunity]:
     # profit is judged on LANDED cost (price + any reshipping/forwarding)
     landed = product.landed_cost
     sell_now, list_ask = scenarios(landed, market, cfg.profit, cfg.vat)
@@ -496,6 +498,7 @@ def _build_opportunity(product: Product, size_label: Optional[str],
 
     opp = Opportunity(
         retail=product, size_label=size_label, us_size=us_size,
+        size_system=size_system,
         stockx=sx_product, variant=variant, market=market,
         sell_now=sell_now, list_ask=list_ask,
         est_days_to_clear=est_days_to_clear(market),
@@ -540,7 +543,8 @@ def _attach_preferred_source(opp: Opportunity, cfg: AppConfig, db: Database) -> 
     if opp.sizeless:
         has = "in stock"          # no sizes to compare on either side
     elif in_stock:
-        has = ("HAS EU " + opp.size_label if opp.size_label in in_stock
+        has = (f"HAS {opp.size_system or 'EU'} {opp.size_label}"
+               if opp.size_label in in_stock
                else f"sizes: {', '.join(in_stock[:8])}")
     else:
         has = "size availability unknown — check"
@@ -588,7 +592,8 @@ async def _maybe_alert(opp: Opportunity, scraper: RetailerScraper, cfg: AppConfi
         if confirmed.price > opp.retail.price + 0.01:
             rebuilt = _build_opportunity(
                 confirmed, opp.size_label, opp.us_size, opp.stockx, opp.variant,
-                opp.market, opp.match_confidence, cfg)
+                opp.market, opp.match_confidence, cfg,
+                size_system=opp.size_system)
             if rebuilt is None:
                 log.info("%s no longer profitable at confirmed price €%.2f",
                          opp.key, confirmed.price)

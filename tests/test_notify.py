@@ -115,3 +115,33 @@ class TestUnverifiedSizeWording:
         text = format_opportunity(_opp(False), "new")
         assert "size EU 42" in text
         assert "UNKNOWN" not in text
+
+
+class TestSizeSystemLabelling:
+    """Alerts printed "EU {label}" whatever the retailer actually lists in.
+
+    Teamsport lists Nike/Jordan in US sizes, so a US 12.5 was announced as
+    "EU 12.5" — two full sizes off what would arrive.
+    """
+
+    def _with_system(self, system, label, us_size):
+        o = _opp(False)
+        o.size_system, o.size_label, o.us_size = system, label, us_size
+        return format_opportunity(o, "new")
+
+    def test_us_sized_retailer_is_not_called_eu(self):
+        text = self._with_system("US", "12.5", "12.5")
+        assert "US 12.5" in text
+        assert "EU 12.5" not in text
+
+    def test_eu_sized_retailer_still_shows_both(self):
+        text = self._with_system("EU", "42", "8.5")
+        assert "EU 42 / US 8.5" in text
+
+    def test_missing_system_falls_back_to_eu(self):
+        # every pre-existing retailer stored no system; they are EU-listed
+        text = self._with_system(None, "42", "8.5")
+        assert "EU 42 / US 8.5" in text
+
+    def test_no_redundant_us_when_it_repeats_the_label(self):
+        assert "US 12.5 / US 12.5" not in self._with_system("US", "12.5", "12.5")

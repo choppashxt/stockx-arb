@@ -141,6 +141,12 @@ class Opportunity(BaseModel):
     # size to match, so claiming one would be inventing information.
     size_label: Optional[str] = None     # retailer size label this signal is for
     us_size: Optional[str] = None
+    size_system: Optional[str] = None   # system size_label is expressed in, as
+                                        # the RETAILER declares it. Alerts used
+                                        # to print "EU {label}" unconditionally,
+                                        # which mislabels US-sized retailers
+                                        # (Teamsport lists US: "EU 12.5" for a
+                                        # US 12.5 is a two-size buying error).
     stockx: StockXProduct
     variant: StockXVariant
     market: MarketData

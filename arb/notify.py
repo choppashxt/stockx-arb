@@ -44,6 +44,20 @@ def _alias_line(o: Opportunity, cfg) -> Optional[str]:
             f"payout — check: https://www.goat.com/search?query={query}")
 
 
+def _sized(o: Opportunity) -> str:
+    """The size, labelled in the system the RETAILER actually uses.
+
+    Printing "EU {label}" unconditionally mislabels US-sized retailers: a
+    Teamsport US 12.5 rendered as "EU 12.5" is two full sizes off what the
+    buyer would receive. The US figure is dropped when it would just repeat the
+    label, which is the case whenever the retailer already lists in US.
+    """
+    system = (o.size_system or "EU").upper()
+    if system == "US" or o.us_size in (None, "?", o.size_label):
+        return f"{system} {o.size_label}"
+    return f"{system} {o.size_label} / US {o.us_size}"
+
+
 def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
     """Skimmable act-now message (plain text; Telegram-safe after escaping)."""
     m = o.market
@@ -77,10 +91,10 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
         # live-bid candidate among the labels the retailer lists — whether THAT
         # size is in stock is unknown until the human checks (audit 0.1)
         size_line = (f"{o.retail.style_code or '?'} · best-bid candidate: "
-                     f"EU {o.size_label} / US {o.us_size} — "
+                     f"{_sized(o)} — "
                      "⚠ IN-STOCK STATUS UNKNOWN, verify size on page")
     else:
-        size_line = f"{o.retail.style_code or '?'} · size EU {o.size_label} / US {o.us_size}"
+        size_line = f"{o.retail.style_code or '?'} · size {_sized(o)}"
     lines = [
         header,
         size_line,
