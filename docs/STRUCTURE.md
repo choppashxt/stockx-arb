@@ -80,8 +80,10 @@ RetailerScraper.scan()
     -> list[Product]                              (grid-level; price_verified=False)
         |
         v
-run_scan(): stamp per-retailer policy (discount_pct, sale_discount_pct,
-            extra_cost_eur, buy_note) onto each Product
+run_scan(): stamp per-retailer policy (effective_discount_pct,
+            effective_sale_discount_pct, extra_cost_eur, buy_note) onto each
+            Product — the "effective" pair returns 0.0 once discount_expires
+            has passed, so a finished campaign stops being priced in
         |
         v
 db.upsert_retail_product() for every product       (detects new/restocked/price-dropped)
@@ -159,7 +161,9 @@ behind every sale item because markdown depth was the only key.
   `size_stock_unverified`, `discount_pct`/`sale_discount_pct`/`extra_cost_eur`
   (landed-cost inputs). `.landed_cost` is the ONE place cost math happens —
   every profit calculation goes through it, so a promo can never silently
-  apply to full-price stock.
+  apply to full-price stock. The two discount fields are stamped from
+  `RetailerConfig.effective_*`, never from the raw config values, so an expired
+  campaign is already zeroed by the time a Product carries it.
 - **`RetailSize`** — one size row: `label`, `us_size` (only if derivable
   without guessing), `ean` (per-size barcode), `in_stock: Optional[bool]`
   (`None` = retailer doesn't expose it — **never fabricate `True`**).
@@ -197,11 +201,11 @@ bot walls. Sites that block plain clients are simply left out.
 
 | Retailer | Mechanism | Notes |
 |---|---|---|
-| `ballzy` | category grid HTML + size chart | serves EE/LV/LT/FI/SE storefronts |
+| `ballzy` | category grid HTML + size chart | serves EE/LV/LT/FI/SE storefronts; storewide -25% on 2026-09-14 via `discount_pct` + `discount_expires` |
 | `reede` | category grid | |
-| `teamsport` | category grid | registered-customer discount modeled via `discount_pct` |
+| `teamsport` | category grid | registered-customer discount modeled via `discount_pct` (standing pricing: no `discount_expires`, never lapses) |
 | `rademar` | category grid | |
-| `sportland` / `sportland_lt` | Magento GraphQL over `GET ?query=` | child-variant `footwear_size` joins provide verified per-size stock; unresolved joins fall back to unknown rather than guessed stock (`sportland_lv` is intentionally disabled) |
+| `sportland` / `sportland_lt` | Magento GraphQL over `GET ?query=` | child-variant `footwear_size` joins provide verified per-size stock; unresolved joins fall back to unknown rather than guessed stock (`sportland_lv` is intentionally disabled); storewide -20% on 2026-09-14 on both live storefronts |
 | `weekend` | Magento GraphQL over `GET ?query=` | **disabled**: exact honest requests return 200 standalone but receive a Cloudflare challenge in the shared scanner even after conservative concurrency/quiet-window experiments; no evasion attempted |
 | `sns` | Shopify, ld+json + GTINs | |
 | `overkill` | Shopify | ships to EE, `extra_cost_eur` models the forwarding cost |

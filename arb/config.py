@@ -1,7 +1,9 @@
 """Settings: secrets from .env (pydantic-settings), tunables from config.yaml."""
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import yaml
 from typing import Optional
@@ -10,6 +12,24 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Retail promos run on the storefront's own calendar day, not on UTC's. Every
+# retailer carrying one today sits in EET/EEST (Ballzy serves the Baltics,
+# Sportland is .ee/.lt), so a single zone covers them. Judging "today" in UTC
+# would keep a promo alive for the three hours after Tallinn midnight — the
+# over-application this gate exists to prevent.
+PROMO_TZ = ZoneInfo("Europe/Tallinn")
+
+
+def promo_live(expires: Optional[date], *, today: Optional[date] = None) -> bool:
+    """Is a discount carrying this expiry still valid?
+
+    No expiry means standing pricing (a loyalty rate), which never lapses. An
+    expiry is the LAST day the offer runs, inclusive.
+    """
+    if expires is None:
+        return True
+    return (today or datetime.now(PROMO_TZ).date()) <= expires
 
 
 class Secrets(BaseSettings):
@@ -133,16 +153,24 @@ class RetailerConfig(BaseModel):
     # purchase costs extra money and time. extra_cost_eur is added to the buy
     # price before profit is computed, and buy_note is shown on every alert.
     extra_cost_eur: float = 0.0
-    # Standing discount you personally get at this retailer (loyalty/club/
-    # registered-customer pricing). 0.10 = 10% off the listed price, applied
-    # before profit is judged, so real edges are not missed.
+    # Discount you get on EVERY product at this retailer. 0.10 = 10% off the
+    # listed price, applied before profit is judged, so real edges are not
+    # missed. Either standing pricing (loyalty/club/registered-customer) or a
+    # storewide campaign — pair a campaign with discount_expires so it lapses
+    # on its own.
     discount_pct: float = 0.0
     # Extra checkout discount that applies ONLY to already-marked-down items
     # (a running promo rather than standing pricing). Requires the scraper to
-    # report on_sale; if it doesn't, this is simply never applied. Set back to
-    # 0.0 when the promo ends — it is deliberately separate from discount_pct
-    # so a temporary offer never silently inflates full-price stock.
+    # report on_sale; if it doesn't, this is simply never applied. Deliberately
+    # separate from discount_pct so a sale-only offer never silently inflates
+    # full-price stock.
     sale_discount_pct: float = 0.0
+    # Last day (inclusive, Tallinn time) the two discounts above are real.
+    # Leave unset for standing pricing that never lapses; set it for any
+    # temporary campaign. Past it both revert to 0.0 without anyone having to
+    # remember: a stale promo prices stock below what it costs, which turned a
+    # EUR 9 loss into a "+EUR 7 profit" alert the last time one was left behind.
+    discount_expires: Optional[date] = None
     buy_note: str = ""
     # A sibling storefront that is always preferable to buy from (same catalog
     # and price, but no reshipping). Alerts from this retailer will point at
@@ -159,6 +187,16 @@ class RetailerConfig(BaseModel):
     # retailers to skip swim caps and yoga mats
     slug_filters: list[str] = Field(default_factory=list)
     graphql_batch_size: int = 40
+
+    @property
+    def effective_discount_pct(self) -> float:
+        """discount_pct, or 0.0 once the campaign carrying it has ended."""
+        return self.discount_pct if promo_live(self.discount_expires) else 0.0
+
+    @property
+    def effective_sale_discount_pct(self) -> float:
+        """sale_discount_pct, or 0.0 once the campaign carrying it has ended."""
+        return self.sale_discount_pct if promo_live(self.discount_expires) else 0.0
 
 
 class AppConfig(BaseModel):

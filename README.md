@@ -136,6 +136,37 @@ KMKR registration is real, flip `enabled: true` and set
 `input_vat_reclaimable` / `output_vat_on_sale` / `rate` to model the actual
 position. Nothing else changes.
 
+## Retailer discounts and promos
+
+Two per-retailer fields feed `Product.landed_cost`, the single place buy-side
+cost is computed:
+
+- `discount_pct` — off **every** product (loyalty pricing, or a storewide
+  campaign).
+- `sale_discount_pct` — off **already-marked-down** stock only; needs the
+  scraper to report `on_sale`, and is never applied to full-price items.
+
+A temporary campaign must also set `discount_expires` — the last day it runs,
+inclusive, in Tallinn time:
+
+```yaml
+  ballzy:
+    discount_pct: 0.25
+    discount_expires: 2026-09-14    # -25% storewide, today only
+```
+
+Past that date both discounts read back as `0.0` with no edit required. Leave
+`discount_expires` unset only for standing pricing that genuinely never lapses
+(Teamsport's registered-client 10%).
+
+This matters because a promo left in config after it ends prices stock below
+what it actually costs: while Ballzy's finished 15% sat in config, an EUR 89
+Air Force 1 was treated as EUR 75.65 and alerted as +EUR 7 profit when the real
+result was a EUR 9 **loss**. Set the expiry when you set the discount.
+
+Currently live: Ballzy -25%, Sportland .ee and .lt -20%, all through
+2026-09-14.
+
 ## Adding a retailer
 
 1. Create `arb/retailers/<name>.py` with a class implementing

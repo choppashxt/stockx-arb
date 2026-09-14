@@ -319,7 +319,14 @@ async def _cmd_report(args) -> int:
             # Same cost basis as the scanner: rebuild the stored Product with
             # the current price so discounts/extra costs flow through
             # landed_cost (audit 10.2 — report used price+extra only).
-            basis = o.retail.model_copy(update={"price": cur["price"]}).landed_cost
+            # Discounts are re-read from config rather than reused from the
+            # payload: the stored copy was stamped when the row was alerted, so
+            # a campaign that has since expired would otherwise be re-applied.
+            update = {"price": cur["price"]}
+            if (rcfg := cfg.retailers.get(o.retail.retailer)) is not None:
+                update["discount_pct"] = rcfg.effective_discount_pct
+                update["sale_discount_pct"] = rcfg.effective_sale_discount_pct
+            basis = o.retail.model_copy(update=update).landed_cost
             sn, _ = scenarios(basis, md, cfg.profit, cfg.vat)
             profit = sn.profit if sn else float("-inf")
             if profit < cfg.filters.min_profit_eur:
