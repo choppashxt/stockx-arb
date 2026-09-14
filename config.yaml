@@ -158,6 +158,10 @@ retailers:
     discount_pct: 0.25
     discount_expires: 2026-09-14
     buy_note: "-25% storewide today (2026-09-14), sale stock included"
+    # Campaign-window boost: 15 -> 10 min while the -25% runs, so newly
+    # arbitrageable stock is found sooner. request_delay_seconds is NOT touched
+    # — robots.txt asks Crawl-delay 2 and 2.5 stays. Lapses with the discount.
+    promo_scan_interval_minutes: 10
     # Sale-items-only promos go here instead. 0.0 since the last one ended
     # (confirmed 2026-08-09): while it was 0.15 every Ballzy sale item was
     # priced 15% below what it actually costs — an Air Force 1 at EUR 89 was
@@ -225,6 +229,14 @@ retailers:
     discount_pct: 0.20
     discount_expires: 2026-09-14
     buy_note: "-20% storewide today (2026-09-14) — check the cart price before buying"
+    # Campaign-window boost: 20 -> 14 min, and 1200 -> 1800 sitemap slice (30 ->
+    # 45 GraphQL batches per scan, ~3 min of the 14). Deliberately moderate:
+    # 125 back-to-back batches is what made them drop our connections on
+    # 2026-07-27, and being blocked today would cost more than the extra
+    # coverage wins. request_delay_seconds stays at 4.0. Lapses with the
+    # discount, so the heavier crawl cannot outlive the campaign.
+    promo_scan_interval_minutes: 14
+    promo_sitemap_slice_per_scan: 1800
     # 5000 (125 back-to-back GraphQL batches) made them start dropping our
     # connections on 2026-07-27 â€” verified afterwards that they still answer
     # fine at low volume, so this is a rate ceiling, not a block. 1200 = 30

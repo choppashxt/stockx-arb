@@ -187,6 +187,16 @@ class RetailerConfig(BaseModel):
     # retailers to skip swim caps and yoga mats
     slug_filters: list[str] = Field(default_factory=list)
     graphql_batch_size: int = 40
+    # --- promo-window throughput boost -------------------------------------
+    # A storewide markdown makes a large slice of the catalogue arbitrageable
+    # at once, so it is worth scanning this retailer harder — but only while
+    # the campaign runs. These apply ONLY when discount_expires is set and
+    # still live, which is what stops a one-day campaign from leaving a
+    # permanently heavier crawl (and a permanently larger share of the shared
+    # StockX budget) behind it. Unset fields keep the normal value.
+    promo_scan_interval_minutes: Optional[int] = None
+    promo_sitemap_slice_per_scan: Optional[int] = None
+    promo_max_pages: Optional[int] = None
 
     @property
     def effective_discount_pct(self) -> float:
@@ -197,6 +207,51 @@ class RetailerConfig(BaseModel):
     def effective_sale_discount_pct(self) -> float:
         """sale_discount_pct, or 0.0 once the campaign carrying it has ended."""
         return self.sale_discount_pct if promo_live(self.discount_expires) else 0.0
+
+    @property
+    def promo_boost_active(self) -> bool:
+        """Is this retailer inside a live campaign that asks for more crawl?
+
+        Deliberately gated on discount_expires: a boost with no end date is how
+        you end up permanently over-crawling a shop that ran one sale.
+        """
+        return (self.discount_expires is not None
+                and promo_live(self.discount_expires)
+                and any(v for v in (self.promo_scan_interval_minutes,
+                                    self.promo_sitemap_slice_per_scan,
+                                    self.promo_max_pages)))
+
+    @property
+    def effective_scan_interval_minutes(self) -> int:
+        if self.promo_boost_active and self.promo_scan_interval_minutes:
+            return self.promo_scan_interval_minutes
+        return self.scan_interval_minutes
+
+    def promo_adjusted(self) -> "RetailerConfig":
+        """A copy whose crawl knobs carry the boost, for handing to a scraper.
+
+        Scrapers read cfg.max_pages / cfg.sitemap_slice_per_scan straight off
+        the config, so the boost is applied by adjusting the config they are
+        built with rather than teaching a dozen call sites about promo windows.
+        """
+        if not self.promo_boost_active:
+            return self
+        update = {}
+        if self.promo_sitemap_slice_per_scan:
+            update["sitemap_slice_per_scan"] = self.promo_sitemap_slice_per_scan
+        if self.promo_max_pages:
+            update["max_pages"] = self.promo_max_pages
+        return self.model_copy(update=update) if update else self
+
+    @property
+    def cost_policy_signature(self) -> str:
+        """Everything that moves landed cost without moving the listed price.
+
+        Compared scan-to-scan to notice a campaign starting or ending; see
+        run_scan, which re-prices the catalogue when this changes.
+        """
+        return (f"{self.effective_discount_pct}|{self.effective_sale_discount_pct}"
+                f"|{self.extra_cost_eur}")
 
 
 class AppConfig(BaseModel):

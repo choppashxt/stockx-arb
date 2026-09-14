@@ -63,13 +63,35 @@ async def run_scan(retailer_name: str, cfg: AppConfig, db: Database,
             p.sale_discount_pct = rcfg.effective_sale_discount_pct
             p.buy_note = rcfg.buy_note or None
 
+        # A CHECKOUT discount moves landed cost without moving the listed
+        # price, so the price_dropped check below is blind to it: p.price is
+        # byte-identical, only discount_pct moved. That matters because the
+        # refresh tiers run off cached verdicts computed at the OLD cost — a
+        # -25% storewide campaign leaves newly-profitable stock sitting in the
+        # cold (480min) and no-bid (720min) tiers, looked at 2-3 times in the
+        # whole day it is worth buying. So when a retailer's cost policy moves,
+        # re-price what it lists. This corrects the books in both directions:
+        # once when a campaign starts, and again when it lapses and the stale
+        # promo-inflated verdicts have to come back down.
+        policy_key = f"cost_policy:{retailer_name}"
+        policy = rcfg.cost_policy_signature
+        policy_changed = db.kv_get(policy_key) != policy
+        if policy_changed:
+            # Recorded up front, not after the loop: the forced re-price is
+            # bounded by market_calls_per_scan and the budget, and a scan that
+            # stops early must not re-force the whole catalogue every cycle.
+            db.kv_set(policy_key, policy)
+            log.info("%s: landed-cost policy changed -> %s; re-pricing what "
+                     "this scan lists", retailer_name, policy)
+
         # A retail discount is the single biggest reason something becomes
         # arbitrageable, so it must override the bid-refresh tier: these get
         # live market data this scan, not a day-old snapshot.
         changed: set[tuple[str, str]] = set()
         for product in products:
             flags = db.upsert_retail_product(product)
-            if flags["price_dropped"] or flags["is_new"] or flags["restocked"]:
+            if (policy_changed or flags["price_dropped"] or flags["is_new"]
+                    or flags["restocked"]):
                 changed.add((product.retailer, product.url))
         if changed:
             log.info("%s: %d new/discounted/restocked -> forcing fresh bids",
@@ -734,7 +756,6 @@ async def run_loop(cfg: AppConfig, db: Database, resolver: CatalogResolver,
     plus one watch-refresh task re-pricing hot/warm SKUs on their tier TTL."""
 
     async def loop_one(name: str) -> None:
-        interval = cfg.retailers[name].scan_interval_minutes * 60
         while True:
             try:
                 await run_scan(name, cfg, db, resolver, provider, notifier)
@@ -744,7 +765,11 @@ async def run_loop(cfg: AppConfig, db: Database, resolver: CatalogResolver,
                 db.kv_set(f"consecutive_failures:{name}", str(fails))
                 log.exception("scan of %s failed (%d in a row); continuing "
                               "after interval", name, fails)
-            await asyncio.sleep(interval)
+            # Re-read every cycle rather than once up front: a promo boost
+            # shortens the interval only while the campaign is live, and has to
+            # lapse on its own at midnight without waiting for a restart.
+            await asyncio.sleep(
+                cfg.retailers[name].effective_scan_interval_minutes * 60)
 
     names = [n for n, rc in cfg.retailers.items()
              if rc.enabled and (retailer_filter is None or n == retailer_filter)]

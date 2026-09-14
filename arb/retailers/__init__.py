@@ -47,7 +47,10 @@ def create_scraper(name: str, cfg: RetailerConfig, db=None) -> RetailerScraper:
         cls = _SCRAPERS[name]
     except KeyError:
         raise ValueError(f"unknown retailer '{name}' — known: {sorted(_SCRAPERS)}")
-    return cls(cfg, db)
+    # promo_adjusted() carries any live campaign boost (bigger sitemap slice /
+    # page budget). It is a no-op outside a campaign window, so scrapers never
+    # need to know the boost exists.
+    return cls(cfg.promo_adjusted(), db)
 
 
 def known_retailers() -> list[str]:
