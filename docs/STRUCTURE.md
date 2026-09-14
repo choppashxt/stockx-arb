@@ -205,7 +205,7 @@ bot walls. Sites that block plain clients are simply left out.
 | `reede` | category grid | |
 | `teamsport` | category grid | registered-customer discount modeled via `discount_pct` (standing pricing: no `discount_expires`, never lapses) |
 | `rademar` | category grid | |
-| `sportland` / `sportland_lt` | Magento GraphQL over `GET ?query=` | child-variant `footwear_size` joins provide verified per-size stock; unresolved joins fall back to unknown rather than guessed stock (`sportland_lv` is intentionally disabled); storewide -20% on 2026-09-14 on both live storefronts |
+| `sportland` / `sportland_lt` | Magento GraphQL over `GET ?query=` | child-variant `footwear_size` joins provide verified per-size stock; unresolved joins fall back to unknown rather than guessed stock (`sportland_lv` is intentionally disabled); storewide campaigns are per-country — the -20% on 2026-09-14 is `sportland` (.ee) only, `sportland_lt` stays at full price |
 | `weekend` | Magento GraphQL over `GET ?query=` | **disabled**: exact honest requests return 200 standalone but receive a Cloudflare challenge in the shared scanner even after conservative concurrency/quiet-window experiments; no evasion attempted |
 | `sns` | Shopify, ld+json + GTINs | |
 | `overkill` | Shopify | ships to EE, `extra_cost_eur` models the forwarding cost |

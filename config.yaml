@@ -213,8 +213,11 @@ retailers:
     enabled: true
     scan_interval_minutes: 20     # biggest catalog; batched GraphQL queries
     request_delay_seconds: 4.0
-    # STOREWIDE PROMO 2026-09-14: -20% on all products. Retires itself after
-    # today via discount_expires; do not leave it set past the campaign.
+    # STOREWIDE PROMO 2026-09-14: -20% on all products, on the .ee storefront
+    # ONLY — Sportland runs these per country and sportland_lt is not in this
+    # one. Retires itself after today via discount_expires; do not leave it set
+    # past the campaign, and do not copy it to a sibling storefront without
+    # confirming that country is actually running it.
     discount_pct: 0.20
     discount_expires: 2026-09-14
     buy_note: "-20% storewide today (2026-09-14) — check the cart price before buying"
@@ -251,14 +254,14 @@ retailers:
     # cost to add. Profit figures for this source are correct as printed.
     enabled: true
     extra_cost_eur: 0.0
-    # Same storewide -20% as sportland.ee (2026-09-14), confirmed as running on
-    # the LT storefront too. If it turns out LT is NOT in a future campaign,
-    # leave this at 0.0: the storefronts share a catalog, so an .ee-only promo
-    # applied here would price every LT alert 20% under what your contact
-    # actually pays.
-    discount_pct: 0.20
-    discount_expires: 2026-09-14
-    buy_note: "LT store - handled by your LT contact; -20% storewide today (2026-09-14)"
+    # NO DISCOUNT: Sportland's storewide campaigns are per-country, and the
+    # -20% running on .ee on 2026-09-14 does NOT apply here (confirmed
+    # 2026-09-14). Leave this at 0.0 unless LT is separately confirmed to be in
+    # a campaign — the storefronts share a catalog and list price, so an
+    # .ee-only promo applied here would price every LT alert 20% under what
+    # your contact actually pays, and nothing downstream would catch it.
+    discount_pct: 0.0
+    buy_note: "LT store - handled by your LT contact (no storewide promo here)"
     # .ee is always preferable, but LT is never suppressed: the storefronts
     # share a catalog and price while stock differs per country, and LT
     # routinely has sizes .ee does not.

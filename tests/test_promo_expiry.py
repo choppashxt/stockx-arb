@@ -74,12 +74,20 @@ class TestLiveConfig:
     @pytest.mark.parametrize("name,pct", [
         ("ballzy", 0.25),
         ("sportland", 0.20),
-        ("sportland_lt", 0.20),
     ])
     def test_campaign_is_configured_and_dated(self, retailers, name, pct):
         r = retailers[name]
         assert r.discount_pct == pytest.approx(pct)
         assert r.discount_expires is not None, "a campaign must carry an expiry"
+
+    def test_sportland_lt_is_not_in_the_ee_campaign(self, retailers):
+        # Sportland runs storewide campaigns per country. .ee and .lt share a
+        # catalog and list price, so an .ee-only promo copied here would price
+        # every LT alert 20% under what the LT contact actually pays — and
+        # nothing downstream would catch it (confirmed 2026-09-14).
+        assert retailers["sportland_lt"].discount_pct == 0.0
+        assert retailers["sportland"].discount_pct > 0.0, \
+            "guard is meaningless if .ee has no campaign — re-check both"
 
     def test_teamsport_standing_rate_carries_no_expiry(self, retailers):
         r = retailers["teamsport"]

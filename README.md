@@ -164,8 +164,13 @@ what it actually costs: while Ballzy's finished 15% sat in config, an EUR 89
 Air Force 1 was treated as EUR 75.65 and alerted as +EUR 7 profit when the real
 result was a EUR 9 **loss**. Set the expiry when you set the discount.
 
-Currently live: Ballzy -25%, Sportland .ee and .lt -20%, all through
-2026-09-14.
+Campaigns are per-storefront, not per-chain: Sportland runs them per country,
+so a promo on `sportland` (.ee) does not imply one on `sportland_lt`. The two
+share a catalog and list price, so a discount copied across would quietly
+understate what the LT contact pays on every alert. Confirm per storefront.
+
+Currently live: Ballzy -25% and Sportland .ee -20%, both through 2026-09-14.
+`sportland_lt` is not in that campaign.
 
 ## Adding a retailer
 
