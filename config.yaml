@@ -147,13 +147,17 @@ retailers:
     enabled: true
     scan_interval_minutes: 15
     request_delay_seconds: 2.5    # robots.txt asks Crawl-delay: 2; stay above it
-    # STOREWIDE PROMO 2026-09-14: -25% on all products, sale stock included.
-    # It goes in discount_pct (every product) rather than sale_discount_pct
-    # (marked-down stock only), and discount_expires retires it after today
-    # without anyone having to remember.
+    # STOREWIDE PROMO 2026-09-14: -25% off the WHOLE CATALOGUE — confirmed
+    # against Ballzy's own promo email, so it stacks on already-marked-down
+    # sale stock rather than excluding it. That is why it lives in discount_pct
+    # (applied to every product unconditionally) and not sale_discount_pct
+    # (marked-down stock only). It matters here more than anywhere: the sale
+    # categories below are scanned first and are ~100% discounted, so getting
+    # this wrong would misprice almost every Ballzy candidate.
+    # discount_expires retires it after today without anyone having to remember.
     discount_pct: 0.25
     discount_expires: 2026-09-14
-    buy_note: "-25% storewide today (2026-09-14) — check the cart price before buying"
+    buy_note: "-25% storewide today (2026-09-14), sale stock included"
     # Sale-items-only promos go here instead. 0.0 since the last one ended
     # (confirmed 2026-08-09): while it was 0.15 every Ballzy sale item was
     # priced 15% below what it actually costs — an Air Force 1 at EUR 89 was

@@ -89,6 +89,25 @@ class TestLiveConfig:
         assert retailers["sportland"].discount_pct > 0.0, \
             "guard is meaningless if .ee has no campaign — re-check both"
 
+    def test_ballzy_promo_covers_the_whole_catalogue(self, retailers):
+        # Confirmed against Ballzy's promo email: the -25% applies to the whole
+        # catalogue, stacking on already-marked-down stock. It must therefore
+        # ride discount_pct (unconditional) — moving it to sale_discount_pct
+        # would silently stop applying it to full-price items, and the sale
+        # categories are ~100% of where Ballzy candidates come from.
+        r = retailers["ballzy"]
+        assert r.discount_pct > 0.0 and r.sale_discount_pct == 0.0
+
+        def landed(on_sale: bool) -> float:
+            return Product(retailer="ballzy", name="X", url="https://x/y",
+                           price=100.0, on_sale=on_sale,
+                           discount_pct=r.effective_discount_pct,
+                           sale_discount_pct=r.effective_sale_discount_pct
+                           ).landed_cost
+
+        assert landed(on_sale=True) == pytest.approx(75.0)
+        assert landed(on_sale=False) == pytest.approx(75.0)
+
     def test_teamsport_standing_rate_carries_no_expiry(self, retailers):
         r = retailers["teamsport"]
         assert r.discount_pct == pytest.approx(0.10)
