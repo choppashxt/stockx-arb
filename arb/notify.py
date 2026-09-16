@@ -44,6 +44,21 @@ def _alias_line(o: Opportunity, cfg) -> Optional[str]:
             f"payout — check: https://www.goat.com/search?query={query}")
 
 
+def size_text(o: "Opportunity") -> str:
+    """The size as the RETAILER labels it, plus the other system for the
+    StockX side. A US-labelled '10' used to print as 'EU 10' — a size that
+    does not exist — which sent the buyer looking for the wrong thing."""
+    system = (getattr(o, "size_system", None) or "EU").upper()
+    if system == "US":
+        eu = (o.variant.conversions or {}).get("eu") if o.variant else None
+        return f"US {o.size_label}" + (f" ({eu})" if eu else "")
+    if system == "EU":
+        return f"EU {o.size_label} / US {o.us_size}"
+    # letter / UK / unknown: show the label as-is, add US only if it differs
+    extra = f" / US {o.us_size}" if o.us_size and o.us_size != o.size_label else ""
+    return f"{system} {o.size_label}{extra}" if system not in ("LETTER",)         else f"{o.size_label}{extra}"
+
+
 def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
     """Skimmable act-now message (plain text; Telegram-safe after escaping)."""
     m = o.market
@@ -77,10 +92,10 @@ def format_opportunity(o: Opportunity, reason: str, cfg=None) -> str:
         # live-bid candidate among the labels the retailer lists — whether THAT
         # size is in stock is unknown until the human checks (audit 0.1)
         size_line = (f"{o.retail.style_code or '?'} · best-bid candidate: "
-                     f"EU {o.size_label} / US {o.us_size} — "
+                     f"{size_text(o)} — "
                      "⚠ IN-STOCK STATUS UNKNOWN, verify size on page")
     else:
-        size_line = f"{o.retail.style_code or '?'} · size EU {o.size_label} / US {o.us_size}"
+        size_line = f"{o.retail.style_code or '?'} · size {size_text(o)}"
     lines = [
         header,
         size_line,

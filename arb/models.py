@@ -140,6 +140,11 @@ class Opportunity(BaseModel):
     # return exactly one StockX variant with no size value at all. There is no
     # size to match, so claiming one would be inventing information.
     size_label: Optional[str] = None     # retailer size label this signal is for
+    # Which sizing system size_label is written in — the RETAILER's, not
+    # StockX's. teamsport and SNS publish US labels, Ballzy/Sportland EU ones.
+    # Alerts used to print every label as "EU ..." (so a US 10 read "EU 10",
+    # a size that does not exist). Default EU keeps old stored payloads valid.
+    size_system: str = "EU"
     us_size: Optional[str] = None
     stockx: StockXProduct
     variant: StockXVariant

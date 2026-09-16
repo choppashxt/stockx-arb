@@ -129,9 +129,16 @@ class ReedeScraper(RetailerScraper):
             cfg, _ = decoder.raw_decode(html, m.end() - 1)
         except json.JSONDecodeError:
             return name, brand, gender, sizes
-        for attr in (cfg.get("attributes") or {}).values():
+        # Magento with MSI ships two lists: options[].products = child products
+        # that exist with stock somewhere, and salable[attr_id][option_id] =
+        # the children actually purchasable on THIS website. Trusting
+        # products[] alerted a teamsport Phantom 6 in a size the site would not
+        # sell (2026-09-16); reede's template is the same Magento, same risk.
+        salable_map = cfg.get("salable") if isinstance(cfg.get("salable"), dict) else None
+        for attr_id, attr in (cfg.get("attributes") or {}).items():
             if attr.get("code") != "size":
                 continue
+            salable_for_attr = (salable_map or {}).get(str(attr_id))
             for opt in attr.get("options") or []:
                 label = str(opt.get("label") or "").replace(",", ".").strip()
                 if not label:
@@ -139,10 +146,14 @@ class ReedeScraper(RetailerScraper):
                 system = str(opt.get("default_size_type") or "EU").upper()
                 brand = opt.get("brand") or brand
                 gender = opt.get("gender") or gender
+                if salable_for_attr is not None:
+                    in_stock = bool(salable_for_attr.get(str(opt.get("id"))))
+                else:
+                    in_stock = bool(opt.get("products"))
                 sizes.append(RetailSize(
                     label=label,
                     system=system,
                     us_size=label if system == "US" else None,
-                    in_stock=bool(opt.get("products")),
+                    in_stock=in_stock,
                 ))
         return name, brand, gender, sizes

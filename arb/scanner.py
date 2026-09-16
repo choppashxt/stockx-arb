@@ -385,6 +385,7 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
                                  sx_product, variant, market, confidence, cfg)
         if opp is not None:
             opp.size_match_method = method
+            opp.size_system = (size.system or "EU").strip().upper()
             opportunities.append(opp)
 
     if product.size_stock_unverified and opportunities:
