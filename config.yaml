@@ -50,6 +50,15 @@ filters:
                                   # list-at-ask scenario is profitable stay quiet
   max_retail_price_eur: 500.0     # skip items costing more than this
   alert_min_confidence: 0.90      # below this -> review queue, never a firm alert
+  # Price-sanity backstop (added 2026-09-16). A listing below this fraction of
+  # the StockX manufacturer retail price is treated as a scraper parse error
+  # or a scam and goes to the review queue, never priced or alerted. Cause:
+  # teamsport's product page carried a EUR 10.99 accessory in its related
+  # carousel under a EUR 170 Kobe 5 Protro; enrich() took the page-wide
+  # minimum and 21 sizes alerted at up to +EUR 180. The scraper is fixed too;
+  # this is the belt to that braces, and it applies to every retailer.
+  # Genuine alerts so far: 37-87% of MSRP. The Kobe: 6%.
+  min_price_vs_stockx_retail_pct: 0.20
   # Liquidity floors. The official StockX API exposes NO bid/ask counts or sales
   # velocity, so these only apply when the market-data provider supplies them
   # (e.g. a future KicksDB provider). strict_liquidity: true would skip items

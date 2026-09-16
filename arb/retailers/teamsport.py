@@ -30,9 +30,39 @@ _URL_RE = re.compile(r'href="(https://www\.teamsport\.ee/ee/[a-z0-9\-]+)"')
 _STYLE_URL_RE = re.compile(r"([a-z]{1,3}\d{4,6}-\d{3})(?:-cnf)?$")
 _STYLE_IMG_RE = re.compile(r"/([A-Z]{1,3}\d{4,6}-\d{3})(?:_\d+)?\.jpg")
 _ALT_RE = re.compile(r'alt="([^"]{3,80})"')
+
+# Magento product page layout: the product's own price box lives inside
+# <div class="product-info-main">; "related"/"upsell" carousels come after it
+# and carry OTHER products' data-price-amount values. Scoping to this block is
+# what makes min() mean "this product's lowest price" rather than "the
+# cheapest thing anywhere on the page".
+_OWN_BLOCK_START = 'product-info-main'
+_OWN_BLOCK_ENDS = ('block-related', 'block-upsell', 'block-crosssell',
+                   'products-grid', 'product-info-detailed')
 _PRICE_RE = re.compile(r'data-price-amount="([\d.]+)"')
 _SIZE_OPT_RE = re.compile(
     r'\{"id":"\d+","label":"([\d,.]{1,5})","products":\[([^\]]*)\]')
+
+
+def _own_price_block(html: str) -> str:
+    """The slice of a product page holding the product's OWN price markup.
+
+    Bug this fixes (2026-09-11..13): enrich() took min() over every
+    data-price-amount on the page. A Kobe 5 Protro at EUR 170 had a EUR 10.99
+    accessory in its related-products carousel, so the "confirmed" price became
+    10.99 and it alerted in 21 sizes at up to +EUR 180 apparent profit. Falls
+    back to the whole page only when the layout marker is absent, so an
+    unrecognised template degrades to the old behaviour rather than to no price.
+    """
+    start = html.find(_OWN_BLOCK_START)
+    if start < 0:
+        return html
+    end = len(html)
+    for marker in _OWN_BLOCK_ENDS:
+        i = html.find(marker, start + len(_OWN_BLOCK_START))
+        if 0 <= i < end:
+            end = i
+    return html[start:end]
 
 
 class TeamsportScraper(RetailerScraper):
@@ -97,7 +127,8 @@ class TeamsportScraper(RetailerScraper):
             return None
         enriched = product.model_copy(deep=True)
 
-        prices = [float(p) for p in _PRICE_RE.findall(html) if float(p) > 0]
+        prices = [float(p) for p in _PRICE_RE.findall(_own_price_block(html))
+                  if float(p) > 0]
         if prices:
             enriched.price = min(prices)
 

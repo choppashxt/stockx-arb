@@ -200,6 +200,24 @@ async def _evaluate_product(product: Product, cfg: AppConfig, db: Database,
                       {"confidence": confidence, "stockx": sx_product.title})
         return [], False
 
+    # Price-sanity backstop, BEFORE any market-data call is spent on it. A
+    # listing far below the manufacturer's retail price is a scraper reading
+    # the wrong element (a EUR 10.99 accessory under a EUR 170 Kobe produced 21
+    # false alerts on 2026-09-11) or a scam listing — either way not something
+    # to price, let alone tell a human to buy. Genuine clearance never gets
+    # anywhere near this line.
+    floor_pct = cfg.filters.min_price_vs_stockx_retail_pct
+    msrp = sx_product.retail_price
+    if floor_pct and msrp and product.landed_cost < floor_pct * msrp:
+        log.warning("%s: retail EUR %.2f is %.0f%% of StockX MSRP EUR %.2f — "
+                    "treating as a parse error, not alerting", product.url,
+                    product.landed_cost, 100 * product.landed_cost / msrp, msrp)
+        db.add_review(product.retailer, product.url, product.style_code,
+                      "implausible_price",
+                      {"retail_price": product.landed_cost, "stockx_msrp": msrp,
+                       "stockx": sx_product.title})
+        return [], False
+
     variants = await resolver.variants(sx_product.product_id)
     if not variants:
         return [], False

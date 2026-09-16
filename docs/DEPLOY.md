@@ -197,6 +197,31 @@ exactly like a dead scanner.
 `Restart=always` with `RestartSec=60` replaces the `.bat` loop, and services
 start on boot — so a VPS reboot brings everything back without you.
 
+## 7b. Zone.ee only: make the default route self-healing
+
+Zone's VPS network has **no gateway in netplan** — the default route is added
+by Zone's own hook (`/usr/lib/networkd-dispatcher/routable.d/zroute`) when an
+interface comes up. On 2026-09-14 an unattended glibc upgrade restarted
+`systemd-networkd` mid-upgrade, the hook didn't fire, and the server sat with
+no route for two days: panel said "running", sshd and both services were up,
+and not one packet left the box. Alerts simply stopped.
+
+The hook is idempotent, so a one-minute timer that re-runs it can't hurt and
+restores the route within a minute of any future loss:
+
+```bash
+sudo cp /opt/stockx-arb/deploy/zone-route-watchdog.service /opt/stockx-arb/deploy/zone-route-watchdog.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now zone-route-watchdog.timer
+systemctl list-timers zone-route-watchdog.timer --no-pager
+```
+
+To undo: `sudo systemctl disable --now zone-route-watchdog.timer`.
+
+If the route is ever gone right now, the one-off fix is just
+`sudo systemctl restart systemd-networkd` from the panel's web console
+(the hook runs again as the interfaces come back up).
+
 ## 8. Reaching the dashboard
 
 The dashboard has **no authentication** and shows your live opportunities and

@@ -1,0 +1,15 @@
+[Unit]
+Description=Re-add the Zone.ee default route if it has gone missing
+# Zone's VPS network has no gateway in netplan. The default route is added by
+# Zone's own networkd-dispatcher hook (/usr/lib/networkd-dispatcher/routable.d/
+# zroute) when an interface becomes routable. On 2026-09-14 an unattended
+# glibc upgrade restarted systemd-networkd mid-upgrade, the hook did not run,
+# and the box sat with NO default route — sshd and every service up, zero
+# packets in or out — for two days. The hook is idempotent (it checks for a
+# default route before adding one), so re-running it on a timer makes the
+# route self-healing without replacing any of Zone's configuration.
+ConditionPathExists=/usr/lib/networkd-dispatcher/routable.d/zroute
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/networkd-dispatcher/routable.d/zroute
