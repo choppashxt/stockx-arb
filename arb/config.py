@@ -84,7 +84,7 @@ class FilterConfig(BaseModel):
     # the review queue, never priced or alerted. Every genuine alert so far sat
     # at 37-87% of MSRP; the 21 false Kobe alerts of 2026-09-11 sat at 6%.
     # 0 disables the check.
-    min_price_vs_stockx_retail_pct: float = 0.20
+    min_price_vs_stockx_retail_pct: float = 0.10
     min_bids: int = 1
     min_sales_72h: int = 0
     strict_liquidity: bool = False

@@ -58,7 +58,14 @@ filters:
   # minimum and 21 sizes alerted at up to +EUR 180. The scraper is fixed too;
   # this is the belt to that braces, and it applies to every retailer.
   # Genuine alerts so far: 37-87% of MSRP. The Kobe: 6%.
-  min_price_vs_stockx_retail_pct: 0.20
+  # Lowered 0.20 -> 0.10 on the first day's data: at 0.20 the only two items
+  # flagged were REAL clearance apparel right on the line (Nike Club tee
+  # EUR 15.95 vs a junk EUR 80 "MSRP"; adidas face covers EUR 3.79 vs 20).
+  # Neither could ever clear the EUR 5 minimum fee + EUR 10 shipping, so
+  # nothing was lost, but the gate exists for parse errors, not deep apparel
+  # clearance. 0.10 still blocks a EUR 170 shoe read as anything under EUR 17
+  # — every accessory-price or per-month-instalment misread lands well below.
+  min_price_vs_stockx_retail_pct: 0.10
   # Liquidity floors. The official StockX API exposes NO bid/ask counts or sales
   # velocity, so these only apply when the market-data provider supplies them
   # (e.g. a future KicksDB provider). strict_liquidity: true would skip items
